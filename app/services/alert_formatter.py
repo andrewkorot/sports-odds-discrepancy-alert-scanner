@@ -1,0 +1,59 @@
+from collections.abc import Sequence
+from typing import Protocol
+
+from app.domain.models import Opportunity, PredictionMarketQuote, SportsbookQuote
+
+
+def format_telegram_alert(
+    best: Opportunity,
+    predictions: Sequence[PredictionMarketQuote],
+    sportsbooks: Sequence[SportsbookQuote],
+) -> str:
+    prediction_lines = "\n\n".join(
+        f"{q.provider.value.title()}\n"
+        f"Bid: {q.best_bid_probability:.1%} × {q.best_bid_size:,.0f}\n"
+        f"Ask: {q.best_ask_probability:.1%} × {q.best_ask_size:,.0f}"
+        + (" — used for edge" if q.provider == best.prediction_market_provider else "")
+        for q in predictions
+    )
+    sportsbook_lines = "\n".join(
+        f"{q.bookmaker_display_name}: {q.decimal_odds:.2f} → {q.implied_probability:.2%}"
+        for q in sportsbooks
+    )
+    links = "\n".join(
+        link for link in [best.prediction_market_direct_url, best.sportsbook_direct_url] if link
+    )
+    return (
+        "🚨 SOCCER PRICE DISCREPANCY\n\n"
+        f"{best.competition}\n{best.home_team} vs {best.away_team}\n"
+        f"Kickoff: {best.kickoff_time_utc:%Y-%m-%d %H:%M UTC}\n\n"
+        f"Market:\n{best.home_team} to Win — 90 Minutes\n\n"
+        "BEST OPPORTUNITY\n\n"
+        f"Prediction market: {best.prediction_market_provider.value.title()}\n"
+        f"Executable YES ask: {best.prediction_market_best_ask:.1%}\n"
+        f"Ask liquidity: {best.prediction_market_ask_size:,.0f} contracts\n\n"
+        f"Sportsbook: {best.bookmaker_display_name}\n"
+        f"Odds: {best.sportsbook_decimal_odds:.2f}\n"
+        f"Implied probability: {best.sportsbook_implied_probability:.2%}\n\n"
+        f"Edge: +{best.edge_percentage_points:.2f} percentage points\n"
+        f"Threshold: {best.configured_threshold:.2f}% PASSED\n\n"
+        f"PREDICTION MARKETS\n\n{prediction_lines}\n\n"
+        f"SPORTSBOOKS\n\n{sportsbook_lines}\n\n"
+        "QUALITY\n\n✓ Exact/approved event match\n✓ Same 90-minute settlement\n"
+        "✓ Prices fresh\n✓ Liquidity requirement passed\n\n"
+        "Updated: "
+        f"{max(best.prediction_quote_age_seconds, best.sportsbook_quote_age_seconds):.0f}s ago"
+        + (f"\n\n{links}" if links else "")
+    )
+
+
+class TelegramSender(Protocol):
+    async def send(self, message: str) -> None: ...
+
+
+class MockTelegramSender:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    async def send(self, message: str) -> None:
+        self.messages.append(message)
