@@ -9,6 +9,15 @@ def format_telegram_alert(
     predictions: Sequence[PredictionMarketQuote],
     sportsbooks: Sequence[SportsbookQuote],
 ) -> str:
+    selection = best.selection.value.title()
+    if best.participant:
+        selection = best.participant
+    if best.line is not None:
+        selection = (
+            f"{selection} {best.line:+}"
+            if best.market_type == "spread"
+            else (f"{selection} {best.line}")
+        )
     prediction_lines = "\n\n".join(
         f"{q.provider.value.title()}\n"
         f"Bid: {q.best_bid_probability:.1%} × {q.best_bid_size:,.0f}\n"
@@ -27,7 +36,7 @@ def format_telegram_alert(
         "🚨 SOCCER PRICE DISCREPANCY\n\n"
         f"{best.competition}\n{best.home_team} vs {best.away_team}\n"
         f"Kickoff: {best.kickoff_time_utc:%Y-%m-%d %H:%M UTC}\n\n"
-        f"Market:\n{best.home_team} to Win — 90 Minutes\n\n"
+        f"Market:\n{best.market_type.value.title()} — {selection} — 90 Minutes\n\n"
         "BEST OPPORTUNITY\n\n"
         f"Prediction market: {best.prediction_market_provider.value.title()}\n"
         f"Executable YES ask: {best.prediction_market_best_ask:.1%}\n"
@@ -37,6 +46,12 @@ def format_telegram_alert(
         f"Implied probability: {best.sportsbook_implied_probability:.2%}\n\n"
         f"Edge: +{best.edge_percentage_points:.2f} percentage points\n"
         f"Threshold: {best.configured_threshold:.2f}% PASSED\n\n"
+        "MARKET QUALITY\n\n"
+        f"Spread: {best.spread_cents:.1f} cents — PASSED\n"
+        f"Depth within 3 cents of midpoint: "
+        f"${best.total_depth_within_window_usd:,.0f} — PASSED\n"
+        f"Trailing 24-hour volume: ${best.trailing_24h_volume_usd:,.0f} — PASSED\n"
+        "Game date: Today — PASSED\n\n"
         f"PREDICTION MARKETS\n\n{prediction_lines}\n\n"
         f"SPORTSBOOKS\n\n{sportsbook_lines}\n\n"
         "QUALITY\n\n✓ Exact/approved event match\n✓ Same 90-minute settlement\n"

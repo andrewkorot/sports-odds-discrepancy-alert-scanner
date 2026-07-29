@@ -5,7 +5,13 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app.domain.models import Bookmaker, CanonicalEvent, ConnectorHealth, Opportunity
+from app.domain.models import (
+    Bookmaker,
+    CanonicalEvent,
+    ConnectorHealth,
+    MarketCandidate,
+    Opportunity,
+)
 from app.services.scanner import ScannerState
 
 router = APIRouter()
@@ -56,12 +62,14 @@ async def opportunities(
     competition: str | None = None,
     minimum_edge: Annotated[Decimal | None, Query(ge=0)] = None,
     active_only: bool = True,
+    market_type: str | None = None,
 ) -> list[Opportunity]:
     values = state(request).opportunities
     return [
         item
         for item in values
         if (bookmaker is None or item.bookmaker_id == bookmaker)
+        and (market_type is None or item.market_type.value == market_type)
         and (
             prediction_market is None or item.prediction_market_provider.value == prediction_market
         )
@@ -69,6 +77,32 @@ async def opportunities(
         and (minimum_edge is None or item.edge_percentage_points >= minimum_edge)
         and (not active_only or item.active)
     ]
+
+
+@router.get("/market-candidates", response_model=list[MarketCandidate])
+async def market_candidates(
+    request: Request,
+    market_type: str | None = None,
+    accepted: bool | None = None,
+    rejection_reason: str | None = None,
+    provider: str | None = None,
+) -> list[MarketCandidate]:
+    return [
+        item
+        for item in state(request).candidates
+        if (market_type is None or item.prediction_quote.market_type.value == market_type)
+        and (accepted is None or item.accepted is accepted)
+        and (rejection_reason is None or rejection_reason in item.rejection_reasons)
+        and (provider is None or item.prediction_quote.provider.value == provider)
+    ]
+
+
+@router.get("/market-candidates/{candidate_id}", response_model=MarketCandidate)
+async def market_candidate(request: Request, candidate_id: UUID) -> MarketCandidate:
+    for item in state(request).candidates:
+        if item.id == candidate_id:
+            return item
+    raise HTTPException(status_code=404, detail="Market candidate not found")
 
 
 @router.get("/opportunities/{opportunity_id}", response_model=Opportunity)
@@ -96,6 +130,12 @@ async def settings(request: Request) -> dict[str, object]:
         "alert_cooldown_minutes": current.alert_cooldown_minutes,
         "realert_edge_increase_pp": current.realert_edge_increase_pp,
         "oddspapi_poll_interval_seconds": current.oddspapi_poll_interval_seconds,
+        "client_timezone": current.client_timezone,
+        "enabled_market_types": current.enabled_market_types,
+        "max_bid_ask_spread_cents": current.max_bid_ask_spread_cents,
+        "depth_window_from_midpoint_cents": current.depth_window_from_midpoint_cents,
+        "min_depth_within_window_usd": current.min_depth_within_window_usd,
+        "min_trailing_24h_volume_usd": current.min_trailing_24h_volume_usd,
     }
 
 

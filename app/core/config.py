@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from functools import lru_cache
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -19,7 +20,6 @@ class Settings(BaseSettings):
     oddspapi_base_url: str = "https://v5.oddspapi.io/en"
     kalshi_api_key: str | None = None
     kalshi_private_key_path: str | None = None
-    polymarket_api_key: str | None = None
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     enabled_bookmakers: Annotated[list[str], NoDecode] = Field(
@@ -32,6 +32,14 @@ class Settings(BaseSettings):
             "coolbet",
         ]
     )
+    client_timezone: str = "America/New_York"
+    enabled_market_types: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["moneyline", "total", "spread", "btts"]
+    )
+    max_bid_ask_spread_cents: Decimal = Decimal("5")
+    depth_window_from_midpoint_cents: Decimal = Decimal("3")
+    min_depth_within_window_usd: Decimal = Decimal("2000")
+    min_trailing_24h_volume_usd: Decimal = Decimal("5000")
     edge_threshold_pp: Decimal = Decimal("3.0")
     max_prediction_price_age_seconds: int = 20
     max_sportsbook_price_age_seconds: int = 60
@@ -43,11 +51,17 @@ class Settings(BaseSettings):
     realert_edge_increase_pp: Decimal = Decimal("1.0")
     oddspapi_poll_interval_seconds: int = 30
 
-    @field_validator("enabled_bookmakers", mode="before")
+    @field_validator("enabled_bookmakers", "enabled_market_types", mode="before")
     @classmethod
     def parse_enabled_bookmakers(cls, value: object) -> object:
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("client_timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        ZoneInfo(value)
         return value
 
     @model_validator(mode="after")
@@ -59,7 +73,6 @@ class Settings(BaseSettings):
                     "ODDSPAPI_API_KEY": self.oddspapi_api_key,
                     "KALSHI_API_KEY": self.kalshi_api_key,
                     "KALSHI_PRIVATE_KEY_PATH": self.kalshi_private_key_path,
-                    "POLYMARKET_API_KEY": self.polymarket_api_key,
                 }.items()
                 if not value
             ]

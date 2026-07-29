@@ -69,7 +69,7 @@ def test_unavailable_bookmaker_rejected() -> None:
 
 def test_prices_are_not_averaged() -> None:
     results = detected()
-    assert len(results) == 12
+    assert len(results) == 108
     assert {r.prediction_market_provider for r in results} == {"kalshi", "polymarket"}
     assert len({r.bookmaker_id for r in results}) == 6
     kalshi_pinnacle = next(

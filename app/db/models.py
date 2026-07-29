@@ -102,7 +102,12 @@ class MarketRow(Base):
     period: Mapped[str] = mapped_column(String(32))
     includes_extra_time: Mapped[bool] = mapped_column(Boolean, default=False)
     includes_penalties: Mapped[bool] = mapped_column(Boolean, default=False)
-    __table_args__ = (UniqueConstraint("event_id", "market_type", "selection", "period"),)
+    participant: Mapped[str | None] = mapped_column(String(128))
+    line: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    settlement_rule: Mapped[str] = mapped_column(String(128), default="soccer_regulation")
+    __table_args__ = (
+        UniqueConstraint("event_id", "market_type", "selection", "participant", "line", "period"),
+    )
 
 
 class ProviderMarketRow(Base):
@@ -167,6 +172,47 @@ class OpportunityRow(Base):
     configured_threshold: Mapped[Decimal] = mapped_column(Numeric(12, 6))
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    qualification_status: Mapped[str] = mapped_column(String(32), default="accepted")
+    liquidity_qualification: Mapped[dict[str, object] | None] = mapped_column(JSON)
+
+
+class OrderBookSnapshotRow(Base):
+    __tablename__ = "order_book_snapshots"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    provider_market_id: Mapped[UUID] = mapped_column(ForeignKey("provider_markets.id"))
+    outcome: Mapped[str] = mapped_column(String(32))
+    best_bid: Mapped[Decimal | None] = mapped_column(Numeric(12, 8))
+    best_ask: Mapped[Decimal | None] = mapped_column(Numeric(12, 8))
+    midpoint: Mapped[Decimal | None] = mapped_column(Numeric(12, 8))
+    spread_cents: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    trailing_24h_volume_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
+    volume_source: Mapped[str | None] = mapped_column(String(32))
+    source_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    received_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class OrderBookLevelRow(Base):
+    __tablename__ = "order_book_levels"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    snapshot_id: Mapped[UUID] = mapped_column(ForeignKey("order_book_snapshots.id"))
+    side: Mapped[str] = mapped_column(String(8))
+    price: Mapped[Decimal] = mapped_column(Numeric(12, 8))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(20, 4))
+    notional_usd: Mapped[Decimal] = mapped_column(Numeric(20, 4))
+    __table_args__ = (UniqueConstraint("snapshot_id", "side", "price", "quantity"),)
+
+
+class MarketCandidateRow(Base):
+    __tablename__ = "market_candidates"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    prediction_quote_id: Mapped[UUID] = mapped_column(ForeignKey("prediction_market_quotes.id"))
+    sportsbook_quote_id: Mapped[UUID] = mapped_column(ForeignKey("sportsbook_quotes.id"))
+    snapshot_id: Mapped[UUID] = mapped_column(ForeignKey("order_book_snapshots.id"))
+    accepted: Mapped[bool] = mapped_column(Boolean, index=True)
+    edge_percentage_points: Mapped[Decimal] = mapped_column(Numeric(12, 6))
+    rejection_reasons: Mapped[list[str]] = mapped_column(JSON, default=list)
+    liquidity_qualification: Mapped[dict[str, object]] = mapped_column(JSON)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class AlertRow(Base):

@@ -22,7 +22,7 @@ async def test_health_and_seeded_end_to_end(client: AsyncClient) -> None:
     assert health.status_code == 200
     assert health.json()["application_status"] == "ok"
     opportunities = (await client.get("/opportunities")).json()
-    assert len(opportunities) == 12
+    assert len(opportunities) == 108
     pinnacle = next(
         x
         for x in opportunities
@@ -57,3 +57,28 @@ async def test_bookmakers_endpoint(client: AsyncClient) -> None:
         "pinnacle",
         "coolbet",
     }
+
+
+@pytest.mark.asyncio
+async def test_market_type_and_candidate_filters(client: AsyncClient) -> None:
+    totals = (await client.get("/opportunities", params={"market_type": "total"})).json()
+    assert totals and all(item["market_type"] == "total" for item in totals)
+    assert {
+        "midpoint",
+        "spread_cents",
+        "total_depth_within_window_usd",
+        "trailing_24h_volume_usd",
+        "qualification_status",
+    } <= set(totals[0])
+
+    accepted = (await client.get("/market-candidates", params={"accepted": "true"})).json()
+    rejected = (await client.get("/market-candidates", params={"accepted": "false"})).json()
+    assert accepted and all(item["accepted"] for item in accepted)
+    assert rejected and all(not item["accepted"] for item in rejected)
+    mismatch = (
+        await client.get("/market-candidates", params={"rejection_reason": "line_mismatch"})
+    ).json()
+    assert mismatch and all("line_mismatch" in item["rejection_reasons"] for item in mismatch)
+    detail = await client.get(f"/market-candidates/{rejected[0]['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["liquidity"]["overall_passed"]

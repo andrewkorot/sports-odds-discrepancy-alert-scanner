@@ -14,6 +14,7 @@ from app.domain.enums import (
     Period,
     Provider,
     Selection,
+    VolumeSource,
 )
 
 
@@ -47,8 +48,11 @@ class PredictionMarketQuote(DomainModel):
     home_team: str
     away_team: str
     kickoff_time_utc: datetime
-    market_type: MarketType = MarketType.MATCH_WINNER
+    market_type: MarketType = MarketType.MONEYLINE
     selection: Selection
+    participant: str | None = None
+    line: Decimal | None = None
+    settlement_rule: str = "soccer_regulation"
     period: Period = Period.REGULATION
     includes_extra_time: bool = False
     includes_penalties: bool = False
@@ -72,8 +76,11 @@ class SportsbookQuote(DomainModel):
     home_team: str
     away_team: str
     kickoff_time_utc: datetime
-    market_type: MarketType = MarketType.MATCH_WINNER
+    market_type: MarketType = MarketType.MONEYLINE
     selection: Selection
+    participant: str | None = None
+    line: Decimal | None = None
+    settlement_rule: str = "soccer_regulation"
     period: Period = Period.REGULATION
     decimal_odds: Decimal
     implied_probability: Decimal
@@ -104,6 +111,8 @@ class Opportunity(DomainModel):
     kickoff_time_utc: datetime
     market_type: MarketType
     selection: Selection
+    participant: str | None = None
+    line: Decimal | None = None
     prediction_market_provider: Provider
     prediction_market_id: str
     prediction_market_best_bid: Decimal
@@ -125,6 +134,14 @@ class Opportunity(DomainModel):
     mapping_confidence: MatchConfidence
     detected_at: datetime
     active: bool = True
+    midpoint: Decimal
+    spread_cents: Decimal
+    bid_depth_within_window_usd: Decimal
+    ask_depth_within_window_usd: Decimal
+    total_depth_within_window_usd: Decimal
+    trailing_24h_volume_usd: Decimal
+    volume_source: VolumeSource
+    qualification_status: str = "accepted"
 
 
 class Bookmaker(DomainModel):
@@ -148,3 +165,71 @@ class ConnectorHealth(DomainModel):
     missing_required_bookmakers: list[str] = Field(default_factory=list)
     response_latency_ms: Decimal | None = None
     consecutive_failures: int = 0
+
+
+class CanonicalSelection(DomainModel):
+    market_type: MarketType
+    participant: str | None = None
+    outcome: Selection
+    line: Decimal | None = None
+    period: Period = Period.REGULATION
+    regulation_only: bool = True
+    includes_extra_time: bool = False
+    includes_penalties: bool = False
+    settlement_rule: str = "soccer_regulation"
+
+
+class OrderBookLevel(DomainModel):
+    price: Decimal
+    quantity: Decimal
+    notional_usd: Decimal
+
+
+class OrderBookSnapshot(DomainModel):
+    provider: Provider
+    provider_market_id: str
+    outcome: Selection
+    bids: list[OrderBookLevel]
+    asks: list[OrderBookLevel]
+    best_bid: Decimal | None
+    best_ask: Decimal | None
+    midpoint: Decimal | None
+    spread: Decimal | None
+    spread_cents: Decimal | None
+    source_timestamp: datetime
+    received_timestamp: datetime
+    trailing_24h_volume_usd: Decimal | None
+    volume_source: VolumeSource | None
+
+
+class LiquidityQualification(DomainModel):
+    best_bid: Decimal | None
+    best_ask: Decimal | None
+    midpoint: Decimal | None
+    spread_cents: Decimal | None
+    maximum_spread_cents: Decimal
+    spread_passed: bool
+    depth_window_cents: Decimal
+    bid_depth_within_window_usd: Decimal
+    ask_depth_within_window_usd: Decimal
+    total_depth_within_window_usd: Decimal
+    minimum_depth_usd: Decimal
+    depth_passed: bool
+    trailing_24h_volume_usd: Decimal | None
+    minimum_trailing_24h_volume_usd: Decimal
+    volume_source: VolumeSource | None
+    volume_passed: bool
+    overall_passed: bool
+    rejection_reasons: list[str]
+
+
+class MarketCandidate(DomainModel):
+    id: UUID = Field(default_factory=uuid4)
+    prediction_quote: PredictionMarketQuote
+    sportsbook_quote: SportsbookQuote
+    order_book: OrderBookSnapshot
+    liquidity: LiquidityQualification
+    accepted: bool
+    rejection_reasons: list[str]
+    edge_percentage_points: Decimal
+    evaluated_at: datetime

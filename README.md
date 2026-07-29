@@ -1,8 +1,9 @@
 # Soccer Price Discrepancy Scanner
 
-A read-only FastAPI MVP that compares executable Kalshi and Polymarket YES asks
-independently against OddsPapi sportsbook implied probabilities for pregame,
-90-minute soccer match-winner markets. It never trades or bets.
+A read-only FastAPI scanner that compares executable Kalshi and Polymarket asks
+independently against OddsPapi sportsbook implied probabilities for same-day,
+pregame, regulation-time soccer moneyline, total, spread, and BTTS markets. It
+never trades or bets.
 
 ## Quick start
 
@@ -19,7 +20,7 @@ uvicorn app.main:app --reload
 
 Mock mode requires no external credentials. Visit `/docs`, `/health`,
 `/bookmakers`, `/events`, `/opportunities`, `/settings`, and
-`/connector-health`.
+`/connector-health`, and `/market-candidates`.
 
 For PostgreSQL and Redis:
 
@@ -37,9 +38,11 @@ midpoint, last trade, an average provider price, or an average bookmaker price.
 Kalshi's YES ask may be derived as `1 - best NO bid`, using that NO level's size.
 
 Automatic opportunities require exact or approved-alias event matching, matching
-home/away order, kickoff within ten minutes, compatible regulation-only
-settlement, open pregame markets, configured time window, fresh quotes, minimum
-ask size, and an enabled/available bookmaker.
+selection and line, compatible regulation-only settlement, same local calendar
+date in `CLIENT_TIMEZONE`, future kickoff with the configured buffer, fresh
+quotes, spread strictly below the configured maximum, qualifying two-sided depth
+inside the midpoint window, verified rolling 24-hour volume, and an
+enabled/available bookmaker. Midpoint is used only for depth, never edge.
 
 ## Environment
 
@@ -55,10 +58,15 @@ Every variable is also present in `.env.example`.
 | `ODDSPAPI_BASE_URL` | Official localized v5 base URL |
 | `KALSHI_API_KEY` | Kalshi key, live mode only |
 | `KALSHI_PRIVATE_KEY_PATH` | Kalshi signing key path, live mode only |
-| `POLYMARKET_API_KEY` | Polymarket key, live mode only |
 | `TELEGRAM_BOT_TOKEN` | Optional Telegram bot token |
 | `TELEGRAM_CHAT_ID` | Optional Telegram destination |
 | `ENABLED_BOOKMAKERS` | Six comma-separated canonical IDs |
+| `CLIENT_TIMEZONE` | Calendar-day timezone (`America/New_York`) |
+| `ENABLED_MARKET_TYPES` | `moneyline,total,spread,btts` |
+| `MAX_BID_ASK_SPREAD_CENTS` | Strict spread ceiling (`5`) |
+| `DEPTH_WINDOW_FROM_MIDPOINT_CENTS` | Two-sided depth window (`3`) |
+| `MIN_DEPTH_WITHIN_WINDOW_USD` | Inclusive minimum executable depth (`2000`) |
+| `MIN_TRAILING_24H_VOLUME_USD` | Inclusive verified rolling volume (`5000`) |
 | `EDGE_THRESHOLD_PP` | Inclusive edge threshold (`3.0`) |
 | `MAX_PREDICTION_PRICE_AGE_SECONDS` | Prediction quote maximum age (`20`) |
 | `MAX_SPORTSBOOK_PRICE_AGE_SECONDS` | Sportsbook quote maximum age (`60`) |
@@ -105,6 +113,13 @@ make test
 
 The PostgreSQL schema covers bookmakers and aliases, competitions and aliases,
 teams and aliases, canonical/provider events and markets, mappings, both quote
-types, opportunities, alert history, system settings, and connector health.
+types, order-book snapshots and levels, candidate qualification audits,
+opportunities, alert history, system settings, and connector health.
 Redis is intended for current scan state and short-lived alert deduplication;
 mock mode uses deterministic in-process state.
+
+`GET /opportunities` supports `market_type`, bookmaker, prediction market,
+competition, minimum edge, and active-only filtering. `GET /market-candidates`
+exposes accepted and rejected evaluations and supports market type, acceptance,
+rejection reason, and provider filters. Candidate detail includes the full
+liquidity qualification and ordered rejection reasons.

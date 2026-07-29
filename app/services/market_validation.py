@@ -11,11 +11,35 @@ def quote_age_seconds(source_timestamp: datetime, now: datetime) -> Decimal:
 
 def settlement_compatible(prediction: PredictionMarketQuote, sportsbook: SportsbookQuote) -> bool:
     return (
-        prediction.market_type == sportsbook.market_type == MarketType.MATCH_WINNER
+        prediction.market_type == sportsbook.market_type
         and prediction.period == sportsbook.period == Period.REGULATION
         and not prediction.includes_extra_time
         and not prediction.includes_penalties
+        and prediction.settlement_rule == sportsbook.settlement_rule
     )
+
+
+def selection_rejections(
+    prediction: PredictionMarketQuote, sportsbook: SportsbookQuote
+) -> list[str]:
+    reasons: list[str] = []
+    if prediction.period != sportsbook.period:
+        reasons.append("period_mismatch")
+    if prediction.settlement_rule != sportsbook.settlement_rule:
+        reasons.append("settlement_mismatch")
+    if prediction.selection != sportsbook.selection:
+        reasons.append(
+            "side_mismatch" if prediction.market_type == MarketType.TOTAL else "outcome_mismatch"
+        )
+    if prediction.line != sportsbook.line:
+        reasons.append("line_mismatch")
+    if prediction.participant != sportsbook.participant:
+        reasons.append("team_mismatch")
+    if prediction.market_type in {MarketType.TOTAL, MarketType.SPREAD}:
+        line = prediction.line
+        if line is None or abs(line) % 1 != Decimal("0.5"):
+            reasons.append("manual_review")
+    return list(dict.fromkeys(reasons))
 
 
 def markets_open(prediction: PredictionMarketQuote, sportsbook: SportsbookQuote) -> bool:

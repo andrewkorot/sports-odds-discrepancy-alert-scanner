@@ -1,3 +1,4 @@
+from app.domain.enums import Provider
 from app.domain.models import CanonicalEvent, PredictionMarketQuote
 from app.providers.mock.data import mock_snapshot
 
@@ -7,13 +8,13 @@ class MockPolymarketAdapter:
         return [mock_snapshot()[0]]
 
     async def list_markets(self) -> list[PredictionMarketQuote]:
-        return [mock_snapshot()[1][1]]
+        return [q for q in mock_snapshot()[1] if q.provider == Provider.POLYMARKET]
 
     async def get_market(self, market_id: str) -> PredictionMarketQuote:
-        quote = (await self.list_markets())[0]
-        if quote.provider_market_id != market_id:
-            raise KeyError(market_id)
-        return quote
+        for quote in await self.list_markets():
+            if quote.provider_market_id == market_id:
+                return quote
+        raise KeyError(market_id)
 
     async def get_order_book(self, market_id: str) -> PredictionMarketQuote:
         return await self.get_market(market_id)

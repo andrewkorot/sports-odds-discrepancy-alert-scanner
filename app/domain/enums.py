@@ -11,14 +11,27 @@ class Selection(StrEnum):
     HOME = "home"
     DRAW = "draw"
     AWAY = "away"
+    OVER = "over"
+    UNDER = "under"
+    YES = "yes"
+    NO = "no"
 
 
 class MarketType(StrEnum):
-    MATCH_WINNER = "match_winner"
+    MONEYLINE = "moneyline"
+    TOTAL = "total"
+    SPREAD = "spread"
+    BTTS = "btts"
 
 
 class Period(StrEnum):
     REGULATION = "regulation"
+    FIRST_HALF = "first_half"
+
+
+class VolumeSource(StrEnum):
+    PROVIDER_REPORTED = "provider_reported"
+    CALCULATED_FROM_TRADES = "calculated_from_trades"
 
 
 class MarketStatus(StrEnum):
