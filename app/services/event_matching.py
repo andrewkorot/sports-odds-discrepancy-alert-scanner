@@ -16,6 +16,8 @@ def match_event(
     sportsbook: SportsbookQuote,
     kickoff_tolerance_seconds: int = 600,
 ) -> MatchResult:
+    if prediction.sport != sportsbook.sport:
+        return MatchResult(MatchConfidence.REJECTED, "sport mismatch")
     if normalize_competition(prediction.competition) != normalize_competition(
         sportsbook.competition
     ):

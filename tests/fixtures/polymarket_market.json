@@ -1,0 +1,12 @@
+{
+  "id": "market-1",
+  "conditionId": "0xcondition",
+  "question": "Will Inter Miami win?",
+  "active": true,
+  "closed": false,
+  "enableOrderBook": true,
+  "clobTokenIds": "[\"yes-token\", \"no-token\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "endDate": "2026-07-29T23:30:00Z",
+  "volume24hr": "8200.50"
+}

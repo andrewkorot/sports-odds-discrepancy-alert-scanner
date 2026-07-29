@@ -32,7 +32,7 @@ alembic upgrade head
 ## Calculation and qualification
 
 The scanner computes `implied_probability = 1 / decimal_odds`, without vig
-removal, then `(executable_yes_ask - implied_probability) * 100`. The units are
+removal, then `(implied_probability - executable_yes_ask) * 100`. The units are
 percentage points and the threshold is inclusive. It never substitutes bid,
 midpoint, last trade, an average provider price, or an average bookmaker price.
 Kalshi's YES ask may be derived as `1 - best NO bid`, using that NO level's size.
@@ -51,15 +51,23 @@ Every variable is also present in `.env.example`.
 | Variable | Meaning / default |
 |---|---|
 | `APP_ENV` | Environment name (`development`) |
+| `APP_MODE` | Application orchestration mode (`mock` or `live`) |
 | `MOCK_MODE` | Deterministic providers; no credentials (`true`) |
 | `DATABASE_URL` | SQLAlchemy async PostgreSQL URL |
 | `REDIS_URL` | Redis connection URL |
-| `ODDSPAPI_API_KEY` | OddsPapi v5 key, live mode only |
-| `ODDSPAPI_BASE_URL` | Official localized v5 base URL |
-| `KALSHI_API_KEY` | Kalshi key, live mode only |
+| `SPORTS_ODDS_API_KEY` | OddsPapi v5 key when its mode is live |
+| `SPORTS_ODDS_BASE_URL` | Official localized OddsPapi v5 base URL |
+| `KALSHI_API_KEY_ID` | Read-scoped Kalshi API key ID |
 | `KALSHI_PRIVATE_KEY_PATH` | Kalshi signing key path, live mode only |
+| `KALSHI_MODE` | `mock`, `live`, or `disabled` |
+| `POLYMARKET_MODE` | `mock`, `live`, or `disabled`; no key required |
+| `SPORTS_ODDS_MODE` | `mock`, `live`, or `disabled` |
+| `LIVE_DRY_RUN` | Suppress all Telegram delivery (`true`) |
+| `ALERTS_ENABLED` | Master opportunity-alert switch (`false`) |
+| `TELEGRAM_ENABLED` | Telegram delivery switch (`false`) |
 | `TELEGRAM_BOT_TOKEN` | Optional Telegram bot token |
 | `TELEGRAM_CHAT_ID` | Optional Telegram destination |
+| `ENABLED_SPORTS` | Comma-separated canonical sports; currently `soccer` |
 | `ENABLED_BOOKMAKERS` | Six comma-separated canonical IDs |
 | `CLIENT_TIMEZONE` | Calendar-day timezone (`America/New_York`) |
 | `ENABLED_MARKET_TYPES` | `moneyline,total,spread,btts` |
@@ -76,9 +84,20 @@ Every variable is also present in `.env.example`.
 | `MAX_HOURS_BEFORE_KICKOFF` | Furthest pregame boundary (`72`) |
 | `ALERT_COOLDOWN_MINUTES` | Duplicate alert cooldown (`10`) |
 | `REALERT_EDGE_INCREASE_PP` | Early re-alert edge improvement (`1.0`) |
-| `ODDSPAPI_POLL_INTERVAL_SECONDS` | Future REST poll interval (`30`) |
+| `PRICE_POLL_INTERVAL_SECONDS` | Recurring scan interval (`30`) |
+| `DISCOVERY_INTERVAL_SECONDS` | Full discovery interval (`300`) |
+| `EVENT_MATCH_KICKOFF_TOLERANCE_MINUTES` | Cross-provider kickoff tolerance (`15`) |
+| `ALERT_DEDUPE_TTL_SECONDS` | Unchanged-alert suppression (`900`) |
+| `ALERT_EDGE_CHANGE_THRESHOLD` | Material edge change as probability (`0.01`) |
 
 Secrets are never returned by `/settings` or printed by commands.
+
+Sport is a first-class field on canonical events, prediction quotes,
+sportsbook quotes, opportunities, API filters, alerts, and the dashboard.
+`ENABLED_SPORTS=soccer` keeps the current release soccer-only. Future
+baseball or basketball connectors can add their canonical names without
+changing the comparison pipeline, but each sport still needs its own market
+and settlement mappings before it should be enabled in live mode.
 
 ## OddsPapi status
 
@@ -97,10 +116,9 @@ account catalog. Unknown provider names are counted and never silently converted
 to another bookmaker. Missing bookmakers get no zero, null-as-zero, fallback, or
 fabricated quote.
 
-TODO: validate credentialed soccer fixture, regular-time 1X2 market, and current
-odds payloads before implementing their live normalized mapper. Live Kalshi and
-Polymarket transports are likewise future work; typed boundaries and mocks are
-included now. Mock mode is the only scanning mode in this milestone.
+The read-only connectors implement the documented transport contracts. Their
+provider-to-canonical soccer market mapping still requires validation with
+sanitized real responses before live opportunities can be enabled.
 
 ## Development
 
@@ -123,3 +141,84 @@ competition, minimum edge, and active-only filtering. `GET /market-candidates`
 exposes accepted and rejected evaluations and supports market type, acceptance,
 rejection reason, and provider filters. Candidate detail includes the full
 liquidity qualification and ordered rejection reasons.
+
+## Read-only provider architecture
+
+The recurring orchestrator keeps connectors limited to discovery and public
+market-data retrieval:
+
+```text
+Kalshi REST ─┐
+             ├─ typed provider records → normalization/matching → qualification
+Polymarket ──┤                                           │
+OddsPapi ────┘                                           ├─ REST API
+                                                         └─ Telegram output gate
+```
+
+`KalshiConnector` supports signed, read-only event/market discovery, order-book
+snapshots, pagination, and recent public trades. `PolymarketConnector` uses the
+public Gamma, CLOB, and Data APIs and never accepts a wallet, signer, or API key.
+`SportsOddsConnector` retrieves OddsPapi soccer fixtures, bookmaker coverage,
+and current fixture odds. No connector contains order, balance, position,
+portfolio, wallet, transaction-signing, or sportsbook-betting methods.
+
+Provider modes are independent and accept `mock`, `live`, or `disabled`:
+
+```env
+KALSHI_MODE=mock
+POLYMARKET_MODE=live
+SPORTS_ODDS_MODE=live
+```
+
+A failed provider updates only its own sanitized health record. REST polling is
+the supported live synchronization path. WebSocket flags default to false;
+sequence-aware snapshot recovery is not yet implemented, so WebSocket
+availability never blocks REST mode.
+
+The application scans once at startup and then every
+`PRICE_POLL_INTERVAL_SECONDS`. Telegram is output-only and delivery occurs only
+when all three conditions are true:
+
+```env
+LIVE_DRY_RUN=false
+ALERTS_ENABLED=true
+TELEGRAM_ENABLED=true
+```
+
+The default live dry-run retrieves data and exposes results without Telegram
+delivery.
+
+Additional monitoring endpoints:
+
+- `GET /health/providers` — per-provider mode, connectivity, timestamps,
+  latency, counters, staleness, and sanitized error
+- `GET /markets` — current normalized prediction quotes
+- `GET /matches` — current canonical match status
+
+## Docker modes
+
+```bash
+# Mock
+docker compose --env-file .env.mock.example up --build
+
+# Live dry-run (copy first and fill only required credentials)
+cp .env.live.example .env.live
+docker compose --env-file .env.live up --build
+
+docker compose exec api alembic upgrade head
+docker compose exec api pytest -v
+docker compose logs -f api
+open http://localhost:8000/
+curl http://localhost:8000/health/providers
+curl http://localhost:8000/opportunities
+```
+
+The responsive monitoring dashboard is served at `http://localhost:8000/`. It
+shows live opportunity totals, the strongest discrepancies, provider health,
+candidate rejection reasons, and filterable opportunity and audit tables. The
+dashboard refreshes automatically every 30 seconds and can also be refreshed
+manually.
+
+Kalshi requires a read-scoped API key ID and RSA private key for its documented
+market-data endpoints. Polymarket public market data requires no credentials.
+OddsPapi requires `SPORTS_ODDS_API_KEY`.

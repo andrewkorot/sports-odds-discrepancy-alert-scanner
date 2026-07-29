@@ -20,7 +20,7 @@ def test_decimal_odds_conversion_and_precision() -> None:
 def test_ask_based_edge_is_percentage_points() -> None:
     implied = decimal_odds_to_implied_probability(Decimal("2.15"))
     edge = calculate_edge_percentage_points(Decimal("0.52"), implied)
-    assert edge.quantize(Decimal("0.0001")) == Decimal("5.4884")
+    assert edge.quantize(Decimal("0.0001")) == Decimal("-5.4884")
 
 
 def test_kalshi_derived_ask_and_size() -> None:

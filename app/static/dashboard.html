@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <title>PitchEdge — Soccer Market Scanner</title>
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="PitchEdge dashboard">
+      <span class="brand-mark">PE</span>
+      <span><strong>PitchEdge</strong><small>Market intelligence</small></span>
+    </a>
+    <nav class="desktop-nav" aria-label="Dashboard navigation">
+      <button class="nav-link active" data-view="overview">Overview</button>
+      <button class="nav-link" data-view="opportunities">Opportunities</button>
+      <button class="nav-link" data-view="candidates">Candidates</button>
+      <button class="nav-link" data-view="health">System</button>
+    </nav>
+    <div class="header-actions">
+      <span class="mode-pill" id="modePill">Loading</span>
+      <button class="icon-button" id="refreshButton" title="Refresh now" aria-label="Refresh dashboard">
+        <span id="refreshIcon">↻</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow"><span class="live-dot"></span> Read-only scanner</p>
+        <h1>Market intelligence,<br><span>without the noise.</span></h1>
+        <p class="hero-copy">Executable prediction-market prices measured against sportsbook probability—qualified by liquidity, freshness, and exact settlement rules.</p>
+      </div>
+      <div class="scan-status">
+        <div class="radar"><span></span><i></i></div>
+        <div><small>Last scan</small><strong id="lastScan">Connecting…</strong></div>
+      </div>
+    </section>
+
+    <section class="view active" id="view-overview">
+      <div class="metric-grid">
+        <article class="metric accent">
+          <div class="metric-icon">↗</div><span>Qualified edges</span>
+          <strong id="opportunityCount">—</strong><small id="bestEdge">Best edge —</small>
+        </article>
+        <article class="metric">
+          <div class="metric-icon">◎</div><span>Markets watched</span>
+          <strong id="marketCount">—</strong><small>Across prediction venues</small>
+        </article>
+        <article class="metric">
+          <div class="metric-icon">✓</div><span>Accepted candidates</span>
+          <strong id="acceptedCount">—</strong><small id="acceptanceRate">— qualification rate</small>
+        </article>
+        <article class="metric">
+          <div class="metric-icon">⌁</div><span>Providers online</span>
+          <strong id="providerCount">—</strong><small id="providerSummary">Checking connections</small>
+        </article>
+      </div>
+
+      <div class="section-heading">
+        <div><p class="eyebrow">Top signals</p><h2>Best opportunities</h2></div>
+        <button class="text-button" data-jump="opportunities">View all <span>→</span></button>
+      </div>
+      <div class="opportunity-grid" id="topOpportunities">
+        <div class="skeleton card-skeleton"></div><div class="skeleton card-skeleton"></div>
+      </div>
+
+      <div class="split-grid">
+        <section class="panel">
+          <div class="panel-heading"><div><p class="eyebrow">Connectivity</p><h3>Provider health</h3></div><span class="status-label" id="systemStatus">Checking</span></div>
+          <div id="providerHealth" class="provider-list"><div class="skeleton row-skeleton"></div></div>
+        </section>
+        <section class="panel">
+          <div class="panel-heading"><div><p class="eyebrow">Quality control</p><h3>Rejection signals</h3></div></div>
+          <div id="rejectionChart" class="rejection-chart"><div class="skeleton row-skeleton"></div></div>
+        </section>
+      </div>
+    </section>
+
+    <section class="view" id="view-opportunities">
+      <div class="page-heading"><div><p class="eyebrow">Qualified only</p><h2>Opportunities</h2><p>Every result passed timing, settlement, liquidity, volume, freshness, and edge checks.</p></div></div>
+      <div class="filter-bar">
+        <select id="opSportFilter" aria-label="Filter by sport"><option value="">All sports</option></select>
+        <select id="opMarketFilter" aria-label="Filter by market type"><option value="">All markets</option><option value="moneyline">Moneyline</option><option value="total">Totals</option><option value="spread">Spread</option><option value="btts">BTTS</option></select>
+        <select id="opProviderFilter" aria-label="Filter by provider"><option value="">All providers</option><option value="kalshi">Kalshi</option><option value="polymarket">Polymarket</option></select>
+        <select id="opBookFilter" aria-label="Filter by bookmaker"><option value="">All sportsbooks</option></select>
+        <label class="search-field"><span>⌕</span><input id="opSearch" placeholder="Search match or league"></label>
+      </div>
+      <div class="table-card">
+        <div class="responsive-table" id="opportunitiesTable"></div>
+        <div class="empty-state hidden" id="opportunitiesEmpty"><span>◇</span><h3>No matching opportunities</h3><p>Try clearing one of the filters.</p></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-candidates">
+      <div class="page-heading"><div><p class="eyebrow">Decision audit</p><h2>Market candidates</h2><p>Inspect why comparisons qualified or were rejected.</p></div></div>
+      <div class="filter-bar">
+        <select id="candidateSportFilter"><option value="">All sports</option></select>
+        <select id="candidateStatusFilter"><option value="">All decisions</option><option value="accepted">Accepted</option><option value="rejected">Rejected</option></select>
+        <select id="candidateReasonFilter"><option value="">All reasons</option></select>
+        <select id="candidateMarketFilter"><option value="">All markets</option><option value="moneyline">Moneyline</option><option value="total">Totals</option><option value="spread">Spread</option><option value="btts">BTTS</option></select>
+      </div>
+      <div class="candidate-list" id="candidateList"></div>
+    </section>
+
+    <section class="view" id="view-health">
+      <div class="page-heading"><div><p class="eyebrow">Operations</p><h2>System health</h2><p>Provider connectivity, runtime modes, and update telemetry.</p></div></div>
+      <div class="health-grid" id="healthGrid"></div>
+      <section class="panel settings-panel">
+        <div class="panel-heading"><div><p class="eyebrow">Runtime</p><h3>Scanner policy</h3></div><a href="/docs" target="_blank" class="text-button">API docs ↗</a></div>
+        <div class="settings-grid" id="settingsGrid"></div>
+      </section>
+    </section>
+  </main>
+
+  <nav class="mobile-nav" aria-label="Mobile navigation">
+    <button class="active" data-view="overview"><span>◫</span>Overview</button>
+    <button data-view="opportunities"><span>↗</span>Edges</button>
+    <button data-view="candidates"><span>◇</span>Audit</button>
+    <button data-view="health"><span>⌁</span>System</button>
+  </nav>
+
+  <div class="toast hidden" id="toast" role="status"></div>
+  <script src="/static/dashboard.js" defer></script>
+</body>
+</html>

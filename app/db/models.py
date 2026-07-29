@@ -235,6 +235,9 @@ class SystemSettingRow(Base):
 class ConnectorHealthRow(Base):
     __tablename__ = "connector_health"
     provider: Mapped[str] = mapped_column(String(32), primary_key=True)
+    mode: Mapped[str] = mapped_column(String(16), default="mock")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    connected: Mapped[bool] = mapped_column(Boolean, default=False)
     connection_status: Mapped[str] = mapped_column(String(32), index=True)
     last_successful_request: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
@@ -243,3 +246,11 @@ class ConnectorHealthRow(Base):
     missing_required_bookmakers: Mapped[list[str]] = mapped_column(JSON, default=list)
     response_latency_ms: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
     consecutive_failures: Mapped[int] = mapped_column(default=0)
+    last_payload_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_order_book_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    stale: Mapped[bool] = mapped_column(Boolean, default=False)
+    events_discovered: Mapped[int] = mapped_column(default=0)
+    markets_discovered: Mapped[int] = mapped_column(default=0)
+    books_updated: Mapped[int] = mapped_column(default=0)
+    trades_processed: Mapped[int] = mapped_column(default=0)
+    latest_error_code: Mapped[str | None] = mapped_column(String(64))

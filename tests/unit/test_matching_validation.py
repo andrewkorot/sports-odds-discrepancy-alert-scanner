@@ -26,6 +26,14 @@ def test_reversed_home_away_rejected() -> None:
     assert match_event(prediction, sportsbook).confidence == MatchConfidence.REJECTED
 
 
+def test_cross_sport_pair_rejected() -> None:
+    prediction, sportsbook = quotes()
+    sportsbook = sportsbook.model_copy(update={"sport": "baseball"})
+    result = match_event(prediction, sportsbook)
+    assert result.confidence == MatchConfidence.REJECTED
+    assert result.reason == "sport mismatch"
+
+
 def test_kickoff_tolerance_inclusive() -> None:
     prediction, sportsbook = quotes()
     sportsbook = sportsbook.model_copy(

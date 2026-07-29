@@ -1,0 +1,7 @@
+{
+  "market": "0xcondition",
+  "asset_id": "yes-token",
+  "timestamp": "1785366000000",
+  "bids": [{"price": "0.51", "size": "4100"}],
+  "asks": [{"price": "0.54", "size": "3400"}]
+}

@@ -102,15 +102,10 @@ def mock_snapshot(
     ]
     sportsbook_quotes: list[SportsbookQuote] = []
     for market_type, selection, participant, line, ask in SELECTIONS:
-        # A 4pp lower implied probability guarantees a qualifying ask-based edge.
-        target_probability = ask - Decimal("0.04")
+        # A 4pp higher sportsbook probability guarantees a qualifying ask-based edge.
+        target_probability = ask + Decimal("0.04")
         odds = Decimal("1") / target_probability
-        for canonical_id, (display_name, moneyline_home_odds) in BOOKMAKERS.items():
-            selected_odds = (
-                moneyline_home_odds
-                if market_type == MarketType.MONEYLINE and selection == Selection.HOME
-                else odds
-            )
+        for canonical_id, (display_name, _) in BOOKMAKERS.items():
             sportsbook_quotes.append(
                 SportsbookQuote(
                     provider_event_id="oddspapi-mock-mls-1",
@@ -120,8 +115,8 @@ def mock_snapshot(
                     selection=selection,
                     participant=participant,
                     line=line,
-                    decimal_odds=selected_odds,
-                    implied_probability=decimal_odds_to_implied_probability(selected_odds),
+                    decimal_odds=odds,
+                    implied_probability=decimal_odds_to_implied_probability(odds),
                     **common,
                 )
             )

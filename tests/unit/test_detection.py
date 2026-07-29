@@ -32,7 +32,7 @@ def detected(
 def test_threshold_boundary_exactly_three_qualifies() -> None:
     _, predictions, sportsbooks, books = mock_snapshot(NOW)
     prediction = predictions[0].model_copy(
-        update={"best_ask_probability": sportsbooks[0].implied_probability + Decimal("0.03")}
+        update={"best_ask_probability": sportsbooks[0].implied_probability - Decimal("0.03")}
     )
     result = detect_opportunities(
         [prediction], [sportsbooks[0]], [books[0]], Settings(edge_threshold_pp=Decimal("3")), NOW
@@ -75,6 +75,9 @@ def test_prices_are_not_averaged() -> None:
     kalshi_pinnacle = next(
         r
         for r in results
-        if r.prediction_market_provider == "kalshi" and r.bookmaker_id == "pinnacle"
+        if r.prediction_market_provider == "kalshi"
+        and r.bookmaker_id == "pinnacle"
+        and r.market_type == "moneyline"
+        and r.selection == "home"
     )
     assert kalshi_pinnacle.prediction_market_best_ask == Decimal("0.520")

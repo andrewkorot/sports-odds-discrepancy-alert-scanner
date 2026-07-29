@@ -26,23 +26,44 @@ async def test_health_and_seeded_end_to_end(client: AsyncClient) -> None:
     pinnacle = next(
         x
         for x in opportunities
-        if x["bookmaker_id"] == "pinnacle" and x["prediction_market_provider"] == "kalshi"
+        if x["bookmaker_id"] == "pinnacle"
+        and x["prediction_market_provider"] == "kalshi"
+        and x["market_type"] == "moneyline"
+        and x["selection"] == "home"
     )
     assert Decimal(pinnacle["sportsbook_implied_probability"]).quantize(
         Decimal("0.0001")
-    ) == Decimal("0.4651")
-    assert Decimal(pinnacle["edge_percentage_points"]).quantize(Decimal("0.01")) == Decimal("5.49")
+    ) == Decimal("0.5600")
+    assert Decimal(pinnacle["edge_percentage_points"]).quantize(Decimal("0.01")) == Decimal("4.00")
+
+
+@pytest.mark.asyncio
+async def test_dashboard_and_static_assets(client: AsyncClient) -> None:
+    dashboard = await client.get("/")
+    stylesheet = await client.get("/static/dashboard.css")
+    script = await client.get("/static/dashboard.js")
+
+    assert dashboard.status_code == 200
+    assert "PitchEdge" in dashboard.text
+    assert stylesheet.status_code == 200
+    assert "mobile-nav" in stylesheet.text
+    assert script.status_code == 200
+    assert 'fetchJson("/opportunities")' in script.text
 
 
 @pytest.mark.asyncio
 async def test_rest_filters(client: AsyncClient) -> None:
     response = await client.get(
-        "/opportunities", params={"bookmaker": "pinnacle", "minimum_edge": "5"}
+        "/opportunities", params={"bookmaker": "pinnacle", "minimum_edge": "3"}
     )
     assert response.status_code == 200
     assert response.json()
     assert all(x["bookmaker_id"] == "pinnacle" for x in response.json())
-    assert all(Decimal(x["edge_percentage_points"]) >= 5 for x in response.json())
+    assert all(Decimal(x["edge_percentage_points"]) >= 3 for x in response.json())
+    soccer = await client.get("/opportunities", params={"sport": "soccer"})
+    baseball = await client.get("/opportunities", params={"sport": "baseball"})
+    assert soccer.json()
+    assert not baseball.json()
 
 
 @pytest.mark.asyncio
@@ -82,3 +103,19 @@ async def test_market_type_and_candidate_filters(client: AsyncClient) -> None:
     detail = await client.get(f"/market-candidates/{rejected[0]['id']}")
     assert detail.status_code == 200
     assert detail.json()["liquidity"]["overall_passed"]
+
+
+@pytest.mark.asyncio
+async def test_provider_health_markets_and_matches(client: AsyncClient) -> None:
+    health = await client.get("/health/providers")
+    assert health.status_code == 200
+    assert {item["provider"] for item in health.json()} == {
+        "kalshi",
+        "polymarket",
+        "oddspapi",
+    }
+    assert all(item["mode"] == "mock" and item["connected"] for item in health.json())
+    markets = await client.get("/markets")
+    matches = await client.get("/matches")
+    assert markets.status_code == 200 and len(markets.json()) == 18
+    assert matches.status_code == 200 and matches.json()[0]["match_status"] == "matched"

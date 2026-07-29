@@ -16,6 +16,8 @@ def deduplication_key(opportunity: Opportunity) -> str:
             opportunity.prediction_market_provider,
             opportunity.prediction_market_id,
             opportunity.bookmaker_id,
+            str(opportunity.line or ""),
+            str(opportunity.participant or ""),
         ]
     )
 

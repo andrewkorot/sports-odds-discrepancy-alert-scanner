@@ -1,6 +1,8 @@
 from collections.abc import Sequence
 from typing import Protocol
 
+import httpx
+
 from app.domain.models import Opportunity, PredictionMarketQuote, SportsbookQuote
 
 
@@ -32,11 +34,16 @@ def format_telegram_alert(
     links = "\n".join(
         link for link in [best.prediction_market_direct_url, best.sportsbook_direct_url] if link
     )
+    period_label = (
+        "90 Minutes"
+        if best.sport == "soccer" and best.period.value == "regulation"
+        else best.period.value.replace("_", " ").title()
+    )
     return (
-        "🚨 SOCCER PRICE DISCREPANCY\n\n"
+        f"🚨 {best.sport.upper()} PRICE DISCREPANCY\n\n"
         f"{best.competition}\n{best.home_team} vs {best.away_team}\n"
         f"Kickoff: {best.kickoff_time_utc:%Y-%m-%d %H:%M UTC}\n\n"
-        f"Market:\n{best.market_type.value.title()} — {selection} — 90 Minutes\n\n"
+        f"Market:\n{best.market_type.value.title()} — {selection} — {period_label}\n\n"
         "BEST OPPORTUNITY\n\n"
         f"Prediction market: {best.prediction_market_provider.value.title()}\n"
         f"Executable YES ask: {best.prediction_market_best_ask:.1%}\n"
@@ -54,7 +61,7 @@ def format_telegram_alert(
         "Game date: Today — PASSED\n\n"
         f"PREDICTION MARKETS\n\n{prediction_lines}\n\n"
         f"SPORTSBOOKS\n\n{sportsbook_lines}\n\n"
-        "QUALITY\n\n✓ Exact/approved event match\n✓ Same 90-minute settlement\n"
+        f"QUALITY\n\n✓ Exact/approved event match\n✓ Same {period_label} settlement\n"
         "✓ Prices fresh\n✓ Liquidity requirement passed\n\n"
         "Updated: "
         f"{max(best.prediction_quote_age_seconds, best.sportsbook_quote_age_seconds):.0f}s ago"
@@ -72,3 +79,27 @@ class MockTelegramSender:
 
     async def send(self, message: str) -> None:
         self.messages.append(message)
+
+
+class TelegramHttpSender:
+    def __init__(
+        self,
+        bot_token: str,
+        chat_id: str,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        self._chat_id = chat_id
+        self._client = client or httpx.AsyncClient(timeout=15)
+        self._owns_client = client is None
+
+    async def send(self, message: str) -> None:
+        response = await self._client.post(
+            self._url,
+            json={"chat_id": self._chat_id, "text": message, "disable_web_page_preview": True},
+        )
+        response.raise_for_status()
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()

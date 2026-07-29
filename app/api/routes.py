@@ -11,7 +11,10 @@ from app.domain.models import (
     ConnectorHealth,
     MarketCandidate,
     Opportunity,
+    PredictionMarketQuote,
 )
+from app.providers.records import ProviderHealthRecord
+from app.services.orchestration import ScanOrchestrator
 from app.services.scanner import ScannerState
 
 router = APIRouter()
@@ -19,6 +22,10 @@ router = APIRouter()
 
 def state(request: Request) -> ScannerState:
     return cast(ScannerState, request.app.state.scanner)
+
+
+def orchestrator(request: Request) -> ScanOrchestrator:
+    return cast(ScanOrchestrator, request.app.state.orchestrator)
 
 
 class HealthResponse(BaseModel):
@@ -50,8 +57,12 @@ async def bookmakers(request: Request) -> list[Bookmaker]:
 
 
 @router.get("/events", response_model=list[CanonicalEvent])
-async def events(request: Request) -> list[CanonicalEvent]:
-    return state(request).events
+async def events(request: Request, sport: str | None = None) -> list[CanonicalEvent]:
+    return [
+        item
+        for item in state(request).events
+        if sport is None or item.sport == sport.casefold()
+    ]
 
 
 @router.get("/opportunities", response_model=list[Opportunity])
@@ -63,12 +74,14 @@ async def opportunities(
     minimum_edge: Annotated[Decimal | None, Query(ge=0)] = None,
     active_only: bool = True,
     market_type: str | None = None,
+    sport: str | None = None,
 ) -> list[Opportunity]:
     values = state(request).opportunities
     return [
         item
         for item in values
         if (bookmaker is None or item.bookmaker_id == bookmaker)
+        and (sport is None or item.sport == sport.casefold())
         and (market_type is None or item.market_type.value == market_type)
         and (
             prediction_market is None or item.prediction_market_provider.value == prediction_market
@@ -86,11 +99,13 @@ async def market_candidates(
     accepted: bool | None = None,
     rejection_reason: str | None = None,
     provider: str | None = None,
+    sport: str | None = None,
 ) -> list[MarketCandidate]:
     return [
         item
         for item in state(request).candidates
         if (market_type is None or item.prediction_quote.market_type.value == market_type)
+        and (sport is None or item.prediction_quote.sport == sport.casefold())
         and (accepted is None or item.accepted is accepted)
         and (rejection_reason is None or rejection_reason in item.rejection_reasons)
         and (provider is None or item.prediction_quote.provider.value == provider)
@@ -130,8 +145,17 @@ async def settings(request: Request) -> dict[str, object]:
         "alert_cooldown_minutes": current.alert_cooldown_minutes,
         "realert_edge_increase_pp": current.realert_edge_increase_pp,
         "oddspapi_poll_interval_seconds": current.oddspapi_poll_interval_seconds,
+        "app_mode": current.app_mode,
+        "kalshi_mode": current.kalshi_mode,
+        "polymarket_mode": current.polymarket_mode,
+        "sports_odds_mode": current.sports_odds_mode,
+        "live_dry_run": current.live_dry_run,
+        "alerts_enabled": current.alerts_enabled,
+        "telegram_enabled": current.telegram_enabled,
+        "price_poll_interval_seconds": current.price_poll_interval_seconds,
         "client_timezone": current.client_timezone,
         "enabled_market_types": current.enabled_market_types,
+        "enabled_sports": current.enabled_sports,
         "max_bid_ask_spread_cents": current.max_bid_ask_spread_cents,
         "depth_window_from_midpoint_cents": current.depth_window_from_midpoint_cents,
         "min_depth_within_window_usd": current.min_depth_within_window_usd,
@@ -152,4 +176,34 @@ async def connector_health(request: Request) -> list[ConnectorHealth]:
             missing_required_bookmakers=missing if provider == "oddspapi" else [],
         )
         for provider in ("kalshi", "polymarket", "oddspapi")
+    ]
+
+
+@router.get("/health/providers")
+async def provider_health(request: Request) -> list[ProviderHealthRecord]:
+    return list(await orchestrator(request).health())
+
+
+@router.get("/markets")
+async def markets(request: Request, sport: str | None = None) -> list[PredictionMarketQuote]:
+    return [
+        item
+        for item in state(request).predictions
+        if sport is None or item.sport == sport.casefold()
+    ]
+
+
+@router.get("/matches")
+async def matches(request: Request) -> list[dict[str, object]]:
+    return [
+        {
+            "canonical_event_id": event.id,
+            "sport": event.sport,
+            "competition": event.competition,
+            "home_team": event.home_team,
+            "away_team": event.away_team,
+            "kickoff": event.kickoff_time_utc,
+            "match_status": "matched",
+        }
+        for event in state(request).events
     ]

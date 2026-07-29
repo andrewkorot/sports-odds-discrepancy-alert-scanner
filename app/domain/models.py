@@ -38,12 +38,18 @@ class CanonicalEvent(DomainModel):
     kickoff_time_utc: datetime
     status: str = "pregame"
 
+    @field_validator("sport")
+    @classmethod
+    def normalize_sport(cls, value: str) -> str:
+        return value.strip().casefold()
+
 
 class PredictionMarketQuote(DomainModel):
     provider: Provider
     provider_event_id: str
     provider_market_id: str
     canonical_event_id: UUID
+    sport: str = "soccer"
     competition: str
     home_team: str
     away_team: str
@@ -65,11 +71,17 @@ class PredictionMarketQuote(DomainModel):
     market_status: MarketStatus = MarketStatus.OPEN
     direct_url: str | None = None
 
+    @field_validator("sport")
+    @classmethod
+    def normalize_sport(cls, value: str) -> str:
+        return value.strip().casefold()
+
 
 class SportsbookQuote(DomainModel):
     provider: Provider = Provider.ODDSPAPI
     provider_event_id: str
     canonical_event_id: UUID
+    sport: str = "soccer"
     bookmaker_id: str
     bookmaker_display_name: str
     competition: str
@@ -89,6 +101,11 @@ class SportsbookQuote(DomainModel):
     market_status: MarketStatus = MarketStatus.OPEN
     direct_url: str | None = None
 
+    @field_validator("sport")
+    @classmethod
+    def normalize_sport(cls, value: str) -> str:
+        return value.strip().casefold()
+
 
 class MarketMapping(DomainModel):
     prediction_market_provider: Provider
@@ -105,6 +122,7 @@ class MarketMapping(DomainModel):
 class Opportunity(DomainModel):
     id: UUID = Field(default_factory=uuid4)
     canonical_event_id: UUID
+    sport: str = "soccer"
     competition: str
     home_team: str
     away_team: str
@@ -113,6 +131,8 @@ class Opportunity(DomainModel):
     selection: Selection
     participant: str | None = None
     line: Decimal | None = None
+    period: Period = Period.REGULATION
+    settlement_rule: str = "soccer_regulation"
     prediction_market_provider: Provider
     prediction_market_id: str
     prediction_market_best_bid: Decimal
@@ -142,6 +162,11 @@ class Opportunity(DomainModel):
     trailing_24h_volume_usd: Decimal
     volume_source: VolumeSource
     qualification_status: str = "accepted"
+
+    @field_validator("sport")
+    @classmethod
+    def normalize_sport(cls, value: str) -> str:
+        return value.strip().casefold()
 
 
 class Bookmaker(DomainModel):
@@ -177,6 +202,30 @@ class CanonicalSelection(DomainModel):
     includes_extra_time: bool = False
     includes_penalties: bool = False
     settlement_rule: str = "soccer_regulation"
+
+
+class CanonicalMarket(DomainModel):
+    market_type: MarketType
+    period: Period
+    line: Decimal | None = None
+    settlement_scope: str = "soccer_regulation"
+    provider: Provider
+    provider_market_id: str
+    provider_selection_id: str
+    selection_type: Selection
+    selection_team: str | None = None
+    selection_side: str | None = None
+    outcome_name: str
+
+
+class NormalizedTrade(DomainModel):
+    provider: Provider
+    provider_market_id: str
+    selection_id: str
+    price: Decimal
+    quantity: Decimal
+    notional_usd: Decimal
+    executed_at: datetime
 
 
 class OrderBookLevel(DomainModel):

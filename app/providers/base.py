@@ -1,8 +1,29 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
 from app.domain.models import Bookmaker, CanonicalEvent, PredictionMarketQuote, SportsbookQuote
+from app.providers.records import (
+    ProviderEvent,
+    ProviderHealthRecord,
+    ProviderMarket,
+    ProviderOrderBook,
+    ProviderTrade,
+)
+
+
+class PredictionMarketConnector(Protocol):
+    async def discover_events(
+        self, start_time: datetime, end_time: datetime
+    ) -> list[ProviderEvent]: ...
+    async def discover_markets(self, event_id: str) -> list[ProviderMarket]: ...
+    async def get_order_book(self, market_or_token_id: str) -> ProviderOrderBook: ...
+    async def get_recent_trades(
+        self, market_or_token_id: str, since: datetime
+    ) -> list[ProviderTrade]: ...
+    async def health(self) -> ProviderHealthRecord: ...
+    async def aclose(self) -> None: ...
 
 
 class PredictionMarketAdapter(Protocol):

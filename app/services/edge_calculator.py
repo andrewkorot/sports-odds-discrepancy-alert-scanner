@@ -10,4 +10,4 @@ def decimal_odds_to_implied_probability(decimal_odds: Decimal) -> Decimal:
 def calculate_edge_percentage_points(
     executable_yes_ask: Decimal, sportsbook_implied_probability: Decimal
 ) -> Decimal:
-    return (executable_yes_ask - sportsbook_implied_probability) * Decimal("100")
+    return (sportsbook_implied_probability - executable_yes_ask) * Decimal("100")

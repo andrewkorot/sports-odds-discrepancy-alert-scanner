@@ -57,6 +57,10 @@ def evaluate_candidates(
         for sportsbook in sportsbooks:
             if prediction.canonical_event_id != sportsbook.canonical_event_id:
                 continue
+            if prediction.sport not in settings.enabled_sports:
+                continue
+            if prediction.sport != sportsbook.sport:
+                continue
             if prediction.market_type != sportsbook.market_type:
                 continue
             book = bookmaker_by_id.get(sportsbook.bookmaker_id)
@@ -75,7 +79,11 @@ def evaluate_candidates(
                     settings.min_minutes_before_kickoff,
                 )
             )
-            matched = match_event(prediction, sportsbook)
+            matched = match_event(
+                prediction,
+                sportsbook,
+                settings.event_match_kickoff_tolerance_minutes * 60,
+            )
             if matched.confidence not in {MatchConfidence.EXACT, MatchConfidence.APPROVED_ALIAS}:
                 reasons.append(matched.reason or "mapping_rejected")
             if not settlement_compatible(prediction, sportsbook):
@@ -137,6 +145,7 @@ def opportunities_from_candidates(
         results.append(
             Opportunity(
                 canonical_event_id=prediction.canonical_event_id,
+                sport=prediction.sport,
                 competition=prediction.competition,
                 home_team=prediction.home_team,
                 away_team=prediction.away_team,
@@ -145,6 +154,8 @@ def opportunities_from_candidates(
                 selection=prediction.selection,
                 participant=prediction.participant,
                 line=prediction.line,
+                period=prediction.period,
+                settlement_rule=prediction.settlement_rule,
                 prediction_market_provider=prediction.provider,
                 prediction_market_id=prediction.provider_market_id,
                 prediction_market_best_bid=prediction.best_bid_probability,
@@ -167,7 +178,11 @@ def opportunities_from_candidates(
                 ),
                 liquidity_passed=True,
                 freshness_passed=True,
-                mapping_confidence=match_event(prediction, sportsbook).confidence,
+                mapping_confidence=match_event(
+                    prediction,
+                    sportsbook,
+                    settings.event_match_kickoff_tolerance_minutes * 60,
+                ).confidence,
                 detected_at=candidate.evaluated_at,
                 midpoint=quality.midpoint,
                 spread_cents=quality.spread_cents,

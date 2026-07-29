@@ -7,6 +7,10 @@ TEAM_ALIASES = {
     "atlanta utd": "atlanta united",
     "atlanta united fc": "atlanta united",
     "atlanta united": "atlanta united",
+    "manchester united fc": "manchester united",
+    "manchester united": "manchester united",
+    "paris saint germain": "psg",
+    "psg": "psg",
 }
 COMPETITION_ALIASES = {"major league soccer": "mls", "mls": "mls"}
 
