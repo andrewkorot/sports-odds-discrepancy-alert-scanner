@@ -212,6 +212,14 @@ async def test_polymarket_public_orderbook_parsing() -> None:
     )
     assert normalized.best_ask == Decimal("0.54")
     assert normalized.asks[0].notional_usd == Decimal("1836.00")
+    duplicate_book = book.model_copy(update={"asks": [book.asks[0], book.asks[0]]})
+    consolidated = normalize_order_book(
+        duplicate_book,
+        Selection.YES,
+        book.source_timestamp,
+    )
+    assert len(consolidated.asks) == 1
+    assert consolidated.asks[0].quantity == book.asks[0].quantity * 2
     await client.aclose()
 
 

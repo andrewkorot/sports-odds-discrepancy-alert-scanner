@@ -59,6 +59,115 @@ class LiveScanSnapshot:
     event_matches: list[EventMatchAudit]
 
 
+class SportsbookEventIndex:
+    """Pre-normalized indexes that prevent all-to-all provider event matching."""
+
+    def __init__(self, events: list[ProviderEvent], tolerance_minutes: int) -> None:
+        self.by_id = {event.provider_event_id: event for event in events}
+        self._bucket_seconds = max(60, tolerance_minutes * 60)
+        self._ordered: dict[tuple[str, str, str, str], list[ProviderEvent]] = {}
+        self._unordered: dict[tuple[str, str, str, str], list[ProviderEvent]] = {}
+        self._by_time: dict[tuple[str, int], list[ProviderEvent]] = {}
+        for event in events:
+            if event.scheduled_start is None:
+                continue
+            sport = self._sport(event)
+            competition = self._competition(event)
+            home = normalize_team(event.home_team or "")
+            away = normalize_team(event.away_team or "")
+            if home and away:
+                self._ordered.setdefault(
+                    (sport, competition, home, away),
+                    [],
+                ).append(event)
+                first, second = sorted((home, away))
+                self._unordered.setdefault(
+                    (sport, competition, first, second),
+                    [],
+                ).append(event)
+            self._by_time.setdefault(
+                (sport, self._time_bucket(event.scheduled_start)),
+                [],
+            ).append(event)
+
+    def candidates(self, prediction: ProviderEvent, tolerance_minutes: int) -> list[ProviderEvent]:
+        if prediction.scheduled_start is None:
+            return []
+        sport = self._sport(prediction)
+        competition = self._competition(prediction)
+        unordered = bool(
+            prediction.participant_one
+            and prediction.participant_two
+            and not prediction.orientation_known
+        )
+        if unordered:
+            first, second = sorted(
+                (
+                    normalize_team(prediction.participant_one or ""),
+                    normalize_team(prediction.participant_two or ""),
+                )
+            )
+            exact = self._unordered.get((sport, competition, first, second), [])
+        else:
+            exact = self._ordered.get(
+                (
+                    sport,
+                    competition,
+                    normalize_team(prediction.home_team or ""),
+                    normalize_team(prediction.away_team or ""),
+                ),
+                [],
+            )
+        exact_in_window = self._within_window(
+            exact,
+            prediction.scheduled_start,
+            tolerance_minutes,
+        )
+        if exact_in_window:
+            return exact_in_window
+
+        bucket = self._time_bucket(prediction.scheduled_start)
+        nearby: dict[str, ProviderEvent] = {}
+        for offset in (-1, 0, 1):
+            for event in self._by_time.get((sport, bucket + offset), []):
+                nearby[event.provider_event_id] = event
+        within_window = self._within_window(
+            list(nearby.values()),
+            prediction.scheduled_start,
+            tolerance_minutes,
+        )
+        return [
+            event
+            for event in within_window
+            if fuzz.ratio(competition, self._competition(event)) >= 70
+        ]
+
+    def _time_bucket(self, kickoff: datetime) -> int:
+        return int(kickoff.timestamp()) // self._bucket_seconds
+
+    @staticmethod
+    def _sport(event: ProviderEvent) -> str:
+        return (event.sport or "soccer").casefold()
+
+    @staticmethod
+    def _competition(event: ProviderEvent) -> str:
+        return normalize_competition(event.competition or event.category or "")
+
+    @staticmethod
+    def _within_window(
+        events: list[ProviderEvent],
+        kickoff: datetime,
+        tolerance_minutes: int,
+    ) -> list[ProviderEvent]:
+        tolerance_seconds = tolerance_minutes * 60
+        return [
+            event
+            for event in events
+            if event.scheduled_start is not None
+            and abs((kickoff - event.scheduled_start).total_seconds()) <= tolerance_seconds
+        ]
+
+
 def canonical_event_id(event: ProviderEvent) -> UUID:
     key = "|".join(
         [
@@ -608,6 +717,10 @@ async def collect_live_snapshot(
     sportsbook_match_confidence: dict[str, MatchConfidence] = {}
     matched_by_prediction: dict[tuple[Provider, str], ProviderEvent] = {}
     oriented_prediction_by_id: dict[tuple[Provider, str], ProviderEvent] = {}
+    sportsbook_index = SportsbookEventIndex(
+        sportsbook_events,
+        settings.event_match_kickoff_tolerance_minutes,
+    )
     for _connector, prediction_events in prediction_event_batches:
         for raw_event in prediction_events:
             prediction_event = enrich_prediction_event(raw_event)
@@ -638,12 +751,17 @@ async def collect_live_snapshot(
                     prediction_event.provider_event_id,
                 )
             )
-            mapped_events = [
-                event for event in sportsbook_events if event.provider_event_id == mapped_event_id
-            ]
+            mapped_event = (
+                sportsbook_index.by_id.get(mapped_event_id) if mapped_event_id is not None else None
+            )
+            mapped_events = [mapped_event] if mapped_event is not None else []
+            match_candidates = mapped_events or sportsbook_index.candidates(
+                prediction_event,
+                settings.event_match_kickoff_tolerance_minutes,
+            )
             matched, audit = audit_prediction_event(
                 prediction_event,
-                mapped_events or sportsbook_events,
+                match_candidates,
                 settings.event_match_kickoff_tolerance_minutes,
                 (Decimal("70") if mapped_events else settings.event_match_fuzzy_min_score),
                 settings.event_match_ambiguity_margin,

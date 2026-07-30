@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from redis.asyncio import Redis
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import Settings
@@ -22,6 +24,8 @@ from app.services.alert_deduplication import RedisAlertDeduplicator
 from app.services.alerting import AlertCoordinator
 from app.services.live_pipeline import collect_live_snapshot
 from app.services.scanner import ScannerState
+
+logger = logging.getLogger(__name__)
 
 
 class SportsConnector(Protocol):
@@ -104,17 +108,17 @@ class ScanOrchestrator:
         )
 
     async def start(self) -> None:
-        await self.scan_once()
         self._task = asyncio.create_task(self._run(), name="scanner-poll-loop")
 
     async def _run(self) -> None:
         while not self._stopping.is_set():
+            await self.scan_once()
             try:
                 await asyncio.wait_for(
                     self._stopping.wait(), timeout=self.settings.price_poll_interval_seconds
                 )
             except TimeoutError:
-                await self.scan_once()
+                continue
 
     async def scan_once(self) -> None:
         if self.settings.app_mode == "mock" and self.settings.mock_mode:
@@ -158,7 +162,8 @@ class ScanOrchestrator:
                 await self.alerts.process()
                 self.last_scan_error = None
             except Exception as exc:
-                self.last_scan_error = f"Live scan failed: {type(exc).__name__}"
+                logger.exception("Live scan failed")
+                self.last_scan_error = self._safe_scan_error(exc)
         operations: list[tuple[Provider, SportsConnector]] = [
             (connector_provider(connector), connector) for connector in self.prediction_connectors
         ]
@@ -171,6 +176,16 @@ class ScanOrchestrator:
                 await self.repository.persist_health(list(self._health.values()))
             except Exception:
                 pass
+
+    @staticmethod
+    def _safe_scan_error(exc: Exception) -> str:
+        if isinstance(exc, IntegrityError):
+            original = getattr(exc, "orig", None)
+            diagnostic = getattr(original, "diag", None)
+            constraint = getattr(diagnostic, "constraint_name", None)
+            if constraint:
+                return f"Live scan failed: IntegrityError ({constraint})"
+        return f"Live scan failed: {type(exc).__name__}"
 
     def _discovery_window(self) -> tuple[datetime, datetime]:
         now = self.scanner.clock.now().astimezone(UTC)

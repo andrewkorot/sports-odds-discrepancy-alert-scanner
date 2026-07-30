@@ -14,7 +14,11 @@ from app.providers.records import (
     ProviderSportsbookQuote,
     ProviderTrade,
 )
-from app.services.live_pipeline import audit_prediction_event, collect_live_snapshot
+from app.services.live_pipeline import (
+    SportsbookEventIndex,
+    audit_prediction_event,
+    collect_live_snapshot,
+)
 
 
 class FakePredictionConnector:
@@ -148,12 +152,17 @@ class FailingPredictionConnector(FakePredictionConnector):
 class RenamedPredictionConnector(FakePredictionConnector):
     def __init__(self, title: str) -> None:
         self.title = title
+        self.market_requests = 0
 
     async def discover_events(
         self, start_time: datetime, end_time: datetime
     ) -> list[ProviderEvent]:
         events = await super().discover_events(start_time, end_time)
         return [events[0].model_copy(update={"title": self.title})]
+
+    async def discover_markets(self, event_id: str) -> list[ProviderMarket]:
+        self.market_requests += 1
+        return await super().discover_markets(event_id)
 
 
 class UnorderedPredictionConnector(FakePredictionConnector):
@@ -246,8 +255,9 @@ async def test_approved_team_alias_can_flow_into_automatic_matching() -> None:
 
 async def test_fuzzy_event_is_manual_review_and_never_prices_markets() -> None:
     now = datetime(2026, 7, 30, 16, tzinfo=UTC)
+    connector = RenamedPredictionConnector("Inter Miamii vs Atlanta United")
     snapshot = await collect_live_snapshot(
-        [RenamedPredictionConnector("Inter Miamii vs Atlanta United")],
+        [connector],
         FakeSportsConnector(),  # type: ignore[arg-type]
         Settings(enabled_bookmakers=["pinnacle"], edge_threshold_pp=Decimal("3")),
         now,
@@ -267,6 +277,7 @@ async def test_fuzzy_event_is_manual_review_and_never_prices_markets() -> None:
     assert prediction_audit.sportsbook_kickoff_time_utc == datetime(2026, 7, 30, 20, tzinfo=UTC)
     assert snapshot.predictions == []
     assert snapshot.opportunities == []
+    assert connector.market_requests == 0
 
 
 async def test_unordered_kalshi_pair_adopts_unique_sportsbook_orientation() -> None:
@@ -358,3 +369,48 @@ def test_close_fuzzy_candidates_require_manual_review_with_ambiguity_reason() ->
     assert audit.match_confidence == MatchConfidence.MANUAL_REVIEW
     assert "ambiguous_candidate_margin" in audit.rejection_reasons
     assert audit.runner_up_score is not None
+
+
+def test_event_index_shortlists_before_fuzzy_scoring() -> None:
+    kickoff = datetime(2026, 7, 30, 20, tzinfo=UTC)
+    target = ProviderEvent(
+        provider=Provider.ODDSPAPI,
+        provider_event_id="target",
+        title="Inter Miami vs Atlanta United",
+        sport="soccer",
+        competition="MLS",
+        home_team="Inter Miami",
+        away_team="Atlanta United",
+        scheduled_start=kickoff,
+        status="open",
+    )
+    unrelated = [
+        ProviderEvent(
+            provider=Provider.ODDSPAPI,
+            provider_event_id=f"unrelated-{index}",
+            title=f"Club {index} vs Other {index}",
+            sport="soccer",
+            competition="Other League",
+            home_team=f"Club {index}",
+            away_team=f"Other {index}",
+            scheduled_start=kickoff + timedelta(hours=1 + index % 48),
+            status="open",
+        )
+        for index in range(1495)
+    ]
+    prediction = ProviderEvent(
+        provider=Provider.POLYMARKET,
+        provider_event_id="prediction",
+        title="Inter Miami CF vs Atlanta Utd",
+        sport="soccer",
+        competition="Major League Soccer",
+        home_team="Inter Miami CF",
+        away_team="Atlanta Utd",
+        scheduled_start=kickoff,
+        status="open",
+    )
+
+    index = SportsbookEventIndex([*unrelated, target], tolerance_minutes=15)
+    candidates = index.candidates(prediction, tolerance_minutes=15)
+
+    assert [event.provider_event_id for event in candidates] == ["target"]

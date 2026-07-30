@@ -123,7 +123,7 @@ class SportsOddsConnector:
         ]
         self._health = self._health.model_copy(update={"events_discovered": len(records)})
         print(f"Discovered events from {self._base}: {len(records)}")
-        print(records)
+        # print(records)
         return records
 
     async def list_bookmakers(self) -> tuple[list[Bookmaker], list[str]]:

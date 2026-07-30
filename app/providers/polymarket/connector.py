@@ -206,7 +206,7 @@ class PolymarketConnector:
             cursor = next_cursor
         self._health = self._health.model_copy(update={"events_discovered": len(records)})
         print(f"Total events discovered: {len(records)}")
-        print(records)
+        # print(records)
         return records
 
     @staticmethod

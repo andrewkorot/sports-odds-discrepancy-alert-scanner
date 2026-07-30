@@ -1,6 +1,7 @@
 import re
 import unicodedata
 from dataclasses import dataclass
+from functools import lru_cache
 
 TEAM_ALIASES = {
     "inter miami cf": "inter miami",
@@ -80,6 +81,7 @@ class CompetitionIdentity:
     competition_type: str | None = None
 
 
+@lru_cache(maxsize=16384)
 def normalize_text(value: str) -> str:
     value = "".join(
         " " if unicodedata.category(character).startswith("P") else character for character in value
@@ -96,6 +98,17 @@ def _normalized_aliases(defaults: dict[str, str], aliases: dict[str, str] | None
 
 
 def team_identity(value: str, aliases: dict[str, str] | None = None) -> TeamIdentity:
+    if aliases is None:
+        return _cached_team_identity(value)
+    return _team_identity(value, aliases)
+
+
+@lru_cache(maxsize=8192)
+def _cached_team_identity(value: str) -> TeamIdentity:
+    return _team_identity(value, None)
+
+
+def _team_identity(value: str, aliases: dict[str, str] | None) -> TeamIdentity:
     normalized = normalize_text(value)
     mapping = _normalized_aliases(TEAM_ALIASES, aliases)
     normalized = mapping.get(normalized, normalized)
@@ -158,6 +171,44 @@ def qualifiers_compatible(
 
 
 def competition_identity(
+    value: str,
+    aliases: dict[str, str] | None = None,
+    *,
+    country: str | None = None,
+    league_level: int | None = None,
+    gender: str | None = None,
+    age_group: str | None = None,
+    season: str | None = None,
+    competition_type: str | None = None,
+) -> CompetitionIdentity:
+    if (
+        aliases is None
+        and country is None
+        and league_level is None
+        and gender is None
+        and age_group is None
+        and season is None
+        and competition_type is None
+    ):
+        return _cached_competition_identity(value)
+    return _competition_identity(
+        value,
+        aliases,
+        country=country,
+        league_level=league_level,
+        gender=gender,
+        age_group=age_group,
+        season=season,
+        competition_type=competition_type,
+    )
+
+
+@lru_cache(maxsize=4096)
+def _cached_competition_identity(value: str) -> CompetitionIdentity:
+    return _competition_identity(value, None)
+
+
+def _competition_identity(
     value: str,
     aliases: dict[str, str] | None = None,
     *,

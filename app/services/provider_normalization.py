@@ -4,9 +4,10 @@ from decimal import Decimal
 from app.domain.enums import Selection, VolumeSource
 from app.domain.models import (
     NormalizedTrade,
+    OrderBookLevel,
     OrderBookSnapshot,
 )
-from app.providers.records import ProviderOrderBook, ProviderTrade
+from app.providers.records import ProviderBookLevel, ProviderOrderBook, ProviderTrade
 from app.services.liquidity import make_level
 
 
@@ -17,8 +18,8 @@ def normalize_order_book(
     trailing_volume_usd: Decimal | None = None,
     volume_source: VolumeSource | None = None,
 ) -> OrderBookSnapshot:
-    bids = [make_level(level.price, level.quantity) for level in book.bids]
-    asks = [make_level(level.price, level.quantity) for level in book.asks]
+    bids = _consolidate_levels(book.bids)
+    asks = _consolidate_levels(book.asks)
     best_bid = max((level.price for level in bids), default=None)
     best_ask = min((level.price for level in asks), default=None)
     midpoint = (
@@ -43,6 +44,16 @@ def normalize_order_book(
         trailing_24h_volume_usd=trailing_volume_usd,
         volume_source=volume_source,
     )
+
+
+def _consolidate_levels(levels: list[ProviderBookLevel]) -> list[OrderBookLevel]:
+    """Merge repeated provider price levels before qualification and persistence."""
+
+    quantities: dict[Decimal, Decimal] = {}
+    for raw_level in levels:
+        price = raw_level.price
+        quantities[price] = quantities.get(price, Decimal()) + raw_level.quantity
+    return [make_level(price, quantity) for price, quantity in quantities.items()]
 
 
 def normalize_trade(trade: ProviderTrade, selection_id: str) -> NormalizedTrade:

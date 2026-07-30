@@ -209,7 +209,7 @@ class KalshiConnector:
                 break
         self._health = self._health.model_copy(update={"events_discovered": len(records)})
         print(f"Total events discovered: {len(records)}")
-        print(records)
+        # print(records)
         return records
 
     async def _soccer_game_series(self) -> set[str]:
