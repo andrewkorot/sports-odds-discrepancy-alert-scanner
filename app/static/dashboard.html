@@ -8,13 +8,10 @@
   <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
-  <div class="ambient ambient-one"></div>
-  <div class="ambient ambient-two"></div>
-
   <header class="topbar">
     <a class="brand" href="/" aria-label="PitchEdge dashboard">
       <span class="brand-mark">PE</span>
-      <span><strong>PitchEdge</strong><small>Market intelligence</small></span>
+      <span><strong>PitchEdge</strong><small>Price discrepancy scanner</small></span>
     </a>
     <nav class="desktop-nav" aria-label="Dashboard navigation">
       <button class="nav-link active" data-view="overview">Overview</button>
@@ -33,32 +30,49 @@
   <main class="shell">
     <section class="hero">
       <div>
-        <p class="eyebrow"><span class="live-dot"></span> Read-only scanner</p>
-        <h1>Market intelligence,<br><span>without the noise.</span></h1>
-        <p class="hero-copy">Executable prediction-market prices measured against sportsbook probability—qualified by liquidity, freshness, and exact settlement rules.</p>
+        <p class="eyebrow"><span class="live-dot"></span> Live workspace</p>
+        <h1>Scanner overview</h1>
+        <p class="hero-copy">Monitor executable prediction-market prices against sportsbook implied probabilities.</p>
       </div>
       <div class="scan-status">
-        <div class="radar"><span></span><i></i></div>
-        <div><small>Last scan</small><strong id="lastScan">Connecting…</strong></div>
+        <span class="scan-status-icon">↻</span>
+        <div><small>Last completed scan</small><strong id="lastScan">Connecting…</strong></div>
       </div>
     </section>
 
     <section class="view active" id="view-overview">
+      <section class="pipeline-panel">
+        <div class="pipeline-copy">
+          <p class="eyebrow">Current scan</p>
+          <h2 id="pipelineTitle">Checking provider data…</h2>
+          <p id="pipelineDescription">The scanner is collecting the latest events and prices.</p>
+        </div>
+        <div class="pipeline-steps" aria-label="Scanner pipeline">
+          <div class="pipeline-step"><span>1</span><div><small>Discovered</small><strong id="discoveredCount">—</strong></div></div>
+          <i>→</i>
+          <div class="pipeline-step"><span>2</span><div><small>Matched events</small><strong id="matchedEventCount">—</strong></div></div>
+          <i>→</i>
+          <div class="pipeline-step"><span>3</span><div><small>Markets priced</small><strong id="pricedMarketCount">—</strong></div></div>
+          <i>→</i>
+          <div class="pipeline-step"><span>4</span><div><small>Qualified</small><strong id="qualifiedCount">—</strong></div></div>
+        </div>
+      </section>
+
       <div class="metric-grid">
         <article class="metric accent">
-          <div class="metric-icon">↗</div><span>Qualified edges</span>
+          <span>Qualified edges</span>
           <strong id="opportunityCount">—</strong><small id="bestEdge">Best edge —</small>
         </article>
         <article class="metric">
-          <div class="metric-icon">◎</div><span>Markets watched</span>
+          <span>Markets watched</span>
           <strong id="marketCount">—</strong><small>Across prediction venues</small>
         </article>
         <article class="metric">
-          <div class="metric-icon">✓</div><span>Accepted candidates</span>
+          <span>Accepted candidates</span>
           <strong id="acceptedCount">—</strong><small id="acceptanceRate">— qualification rate</small>
         </article>
         <article class="metric">
-          <div class="metric-icon">⌁</div><span>Providers online</span>
+          <span>Providers online</span>
           <strong id="providerCount">—</strong><small id="providerSummary">Checking connections</small>
         </article>
       </div>
@@ -81,6 +95,27 @@
           <div id="rejectionChart" class="rejection-chart"><div class="skeleton row-skeleton"></div></div>
         </section>
       </div>
+
+      <section class="panel unmatched-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">Event matching audit</p><h3>Discovered but unmatched</h3></div>
+          <div class="audit-tools">
+            <select id="unmatchedProviderFilter" aria-label="Filter unmatched events by provider">
+              <option value="">All providers</option>
+            </select>
+            <span class="audit-count" id="unmatchedCount">—</span>
+          </div>
+        </div>
+        <p class="panel-copy">Provider events remain here until team names, competition, kickoff time, and home/away orientation agree. Fuzzy candidates require manual review and never generate opportunities.</p>
+        <div class="unmatched-list" id="unmatchedList"><div class="skeleton row-skeleton"></div></div>
+        <div class="pagination hidden" id="unmatchedPagination">
+          <span id="unmatchedPageSummary">—</span>
+          <div>
+            <button id="unmatchedPrevious" type="button">← Previous</button>
+            <button id="unmatchedNext" type="button">Next →</button>
+          </div>
+        </div>
+      </section>
     </section>
 
     <section class="view" id="view-opportunities">
@@ -94,7 +129,7 @@
       </div>
       <div class="table-card">
         <div class="responsive-table" id="opportunitiesTable"></div>
-        <div class="empty-state hidden" id="opportunitiesEmpty"><span>◇</span><h3>No matching opportunities</h3><p>Try clearing one of the filters.</p></div>
+        <div class="empty-state hidden" id="opportunitiesEmpty"><span>↗</span><h3>No opportunities to show</h3><p id="opportunitiesEmptyCopy">No live comparison currently passes every qualification rule.</p></div>
       </div>
     </section>
 

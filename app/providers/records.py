@@ -19,6 +19,21 @@ class ProviderEvent(ProviderRecord):
     category: str | None = None
     scheduled_start: datetime | None = None
     status: str
+    sport: str | None = None
+    competition: str | None = None
+    home_team: str | None = None
+    away_team: str | None = None
+    participant_one: str | None = None
+    participant_two: str | None = None
+    orientation_known: bool = True
+    extraction_source: str | None = None
+    competition_country: str | None = None
+    competition_league_level: int | None = None
+    competition_gender: str | None = None
+    competition_age_group: str | None = None
+    competition_season: str | None = None
+    competition_type: str | None = None
+    settlement_scope: str = "soccer_regulation"
     raw_market_ids: list[str] = Field(default_factory=list)
 
 
@@ -98,3 +113,7 @@ class ProviderSportsbookQuote(ProviderRecord):
     market_active: bool
     main_line: bool
     changed_at: datetime
+    market_type: str
+    selection: str
+    period: str
+    direct_url: str | None = None

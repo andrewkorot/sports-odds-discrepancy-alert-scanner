@@ -1,4 +1,4 @@
-const state = { health: null, providers: [], opportunities: [], candidates: [], markets: [], settings: {}, refreshTimer: null };
+const state = { health: null, providers: [], events: [], eventMatches: [], bookmakers: [], opportunities: [], candidates: [], markets: [], settings: {}, unmatchedPage: 1, unmatchedPageSize: 8, refreshTimer: null };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -25,11 +25,11 @@ async function refresh(showToast = false) {
   const icon = $("#refreshIcon");
   icon.classList.add("rotating");
   try {
-    const [health, providers, opportunities, candidates, markets, settings] = await Promise.all([
-      get("/health"), get("/health/providers"), get("/opportunities"),
-      get("/market-candidates"), get("/markets"), get("/settings")
+    const [health, providers, events, eventMatches, bookmakers, opportunities, candidates, markets, settings] = await Promise.all([
+      get("/health"), get("/health/providers"), get("/events"),
+      get("/event-matches"), get("/bookmakers"), get("/opportunities"), get("/market-candidates"), get("/markets"), get("/settings")
     ]);
-    Object.assign(state, { health, providers, opportunities, candidates, markets, settings });
+    Object.assign(state, { health, providers, events, eventMatches, bookmakers, opportunities, candidates, markets, settings });
     render();
     if (showToast) toast("Dashboard refreshed");
   } catch (error) {
@@ -43,6 +43,7 @@ async function refresh(showToast = false) {
 function render() {
   const accepted = state.candidates.filter(c => c.accepted);
   const online = state.providers.filter(p => p.connected);
+  const discovered = state.providers.reduce((total, provider) => total + Number(provider.events_discovered || 0), 0);
   $("#modePill").textContent = `${state.settings.app_mode || "mock"} · ${state.settings.live_dry_run ? "dry run" : "alerts"}`;
   $("#lastScan").textContent = age(state.health.last_successful_update);
   $("#opportunityCount").textContent = state.opportunities.length.toLocaleString();
@@ -53,14 +54,132 @@ function render() {
   $("#bestEdge").textContent = `Best edge +${number(best, 2)} pp`;
   $("#acceptanceRate").textContent = `${number(accepted.length / Math.max(1, state.candidates.length) * 100, 0)}% qualification rate`;
   $("#providerSummary").textContent = online.length === state.providers.length ? "All systems operational" : "Provider attention required";
+  $("#discoveredCount").textContent = discovered.toLocaleString();
+  $("#matchedEventCount").textContent = state.events.length.toLocaleString();
+  $("#pricedMarketCount").textContent = state.markets.length.toLocaleString();
+  $("#qualifiedCount").textContent = state.opportunities.length.toLocaleString();
+  renderPipeline(discovered);
   renderTopOpportunities();
   renderProviders();
   renderRejections();
+  renderUnmatchedEvents();
   populateFilters();
   renderOpportunityTable();
   renderCandidates();
   renderHealth();
   renderSettings();
+}
+
+function renderUnmatchedEvents() {
+  const allUnmatched = state.eventMatches.filter(item => !item.matched);
+  const providerFilter = $("#unmatchedProviderFilter");
+  const selectedProvider = providerFilter.value;
+  const providers = [...new Set(allUnmatched.map(item => item.provider))].sort();
+  providerFilter.innerHTML = `<option value="">All providers</option>${providers.map(provider => `<option value="${esc(provider)}">${title(provider)}</option>`).join("")}`;
+  providerFilter.value = providers.includes(selectedProvider) ? selectedProvider : "";
+
+  const unmatched = allUnmatched.filter(item => !providerFilter.value || item.provider === providerFilter.value);
+  const pageCount = Math.max(1, Math.ceil(unmatched.length / state.unmatchedPageSize));
+  state.unmatchedPage = Math.min(state.unmatchedPage, pageCount);
+  const pageStart = (state.unmatchedPage - 1) * state.unmatchedPageSize;
+  const pageRows = unmatched.slice(pageStart, pageStart + state.unmatchedPageSize);
+
+  $("#unmatchedCount").textContent = unmatched.length.toLocaleString();
+  $("#unmatchedList").innerHTML = pageRows.map(item => `
+    <article class="unmatched-row">
+      <div class="unmatched-summary">
+        <div class="provider-logo">${esc(item.provider.slice(0, 2).toUpperCase())}</div>
+        <div class="unmatched-event">
+          <strong>${esc(item.home_team && item.away_team ? `${item.home_team} vs ${item.away_team}` : item.title)}</strong>
+          <small>${title(item.provider)} · ${esc(item.competition || "Competition unknown")} · ${item.kickoff_time_utc ? new Date(item.kickoff_time_utc).toLocaleString([], {dateStyle:"medium", timeStyle:"short"}) : "Kickoff unknown"}</small>
+        </div>
+        <div class="audit-reasons">${item.rejection_reasons.map(reason => `<span class="reason">${title(reason)}</span>`).join("")}</div>
+        <span class="decision ${item.match_confidence === "manual_review" ? "review" : ""}">${title(item.match_confidence)}</span>
+      </div>
+      <details class="audit-details">
+        <summary>Inspect extracted data</summary>
+        <div class="audit-comparison">
+          <section>
+            <p class="eyebrow">${title(item.provider)} event</p>
+            ${auditField("Provider event ID", item.provider_event_id)}
+            ${auditField("Raw title", item.title)}
+            ${auditField("Extracted competition", item.competition)}
+            ${auditField("Normalized competition", item.normalized_competition)}
+            ${auditField("Extracted home", item.home_team)}
+            ${auditField("Normalized home", item.normalized_home_team)}
+            ${auditField("Extracted away", item.away_team)}
+            ${auditField("Normalized away", item.normalized_away_team)}
+            ${auditField("Participant one", item.participant_one)}
+            ${auditField("Normalized participant one", item.normalized_participant_one)}
+            ${auditField("Participant two", item.participant_two)}
+            ${auditField("Normalized participant two", item.normalized_participant_two)}
+            ${auditField("Orientation known", item.orientation_known)}
+            ${auditField("Extraction source", item.extraction_source)}
+            ${auditField("Kickoff UTC", item.kickoff_time_utc)}
+          </section>
+          <section>
+            <p class="eyebrow">Closest OddsPapi candidate</p>
+            ${auditField("Sportsbook event ID", item.sportsbook_event_id)}
+            ${auditField("Raw title", item.sportsbook_title)}
+            ${auditField("Competition", item.sportsbook_competition)}
+            ${auditField("Home team", item.sportsbook_home_team)}
+            ${auditField("Away team", item.sportsbook_away_team)}
+            ${auditField("Kickoff UTC", item.sportsbook_kickoff_time_utc)}
+            ${auditField("Match confidence", item.match_confidence)}
+            ${auditField("Weighted score", item.weighted_score)}
+            ${auditField("Runner-up score", item.runner_up_score)}
+            ${auditField("Score breakdown", item.score_breakdown ? Object.entries(item.score_breakdown).map(([key, value]) => `${title(key)}: ${value}`).join(", ") : null)}
+            ${auditField("Rejection reasons", item.rejection_reasons.join(", "))}
+          </section>
+        </div>
+      </details>
+    </article>`).join("") || `
+    <div class="empty-state compact"><span>✓</span><h3>No unmatched events</h3><p>Every discovered provider event currently has an approved counterpart.</p></div>`;
+
+  const pagination = $("#unmatchedPagination");
+  pagination.classList.toggle("hidden", unmatched.length === 0);
+  $("#unmatchedPageSummary").textContent = unmatched.length
+    ? `Showing ${pageStart + 1}–${Math.min(pageStart + state.unmatchedPageSize, unmatched.length)} of ${unmatched.length}`
+    : "No events";
+  $("#unmatchedPrevious").disabled = state.unmatchedPage <= 1;
+  $("#unmatchedNext").disabled = state.unmatchedPage >= pageCount;
+}
+
+function auditField(label, value) {
+  const rendered = value == null || value === "" ? "Not extracted" : String(value);
+  return `<div class="audit-field"><small>${esc(label)}</small><strong class="${rendered === "Not extracted" ? "missing-value" : ""}">${esc(rendered)}</strong></div>`;
+}
+
+function renderPipeline(discovered) {
+  const titleEl = $("#pipelineTitle");
+  const descriptionEl = $("#pipelineDescription");
+  if (state.health.last_scan_error) {
+    titleEl.textContent = "The latest scan did not complete";
+    descriptionEl.textContent = state.health.last_scan_error;
+    return;
+  }
+  if (discovered > 0 && state.events.length === 0) {
+    titleEl.textContent = "Providers are connected; no fixtures matched";
+    descriptionEl.textContent = `${discovered} provider events were found, but none currently agree on teams, competition, kickoff time, and settlement rules.`;
+    return;
+  }
+  if (state.events.length > 0 && state.markets.length === 0) {
+    titleEl.textContent = "Fixtures matched; executable markets unavailable";
+    descriptionEl.textContent = "Matched fixtures were found, but no eligible open order book was normalized during this scan.";
+    return;
+  }
+  if (state.markets.length > 0 && state.opportunities.length === 0) {
+    titleEl.textContent = "Markets are priced; no edge qualifies";
+    descriptionEl.textContent = "Live comparisons are available, but none pass the configured edge, freshness, and liquidity requirements.";
+    return;
+  }
+  if (state.opportunities.length > 0) {
+    titleEl.textContent = `${state.opportunities.length} qualified ${state.opportunities.length === 1 ? "opportunity" : "opportunities"} detected`;
+    descriptionEl.textContent = "Every displayed edge passed executable-price, freshness, liquidity, matching, and settlement checks.";
+    return;
+  }
+  titleEl.textContent = "Waiting for provider events";
+  descriptionEl.textContent = "The scanner is online and will update this workspace after the next polling cycle.";
 }
 
 function selectionLabel(o) {
@@ -144,6 +263,10 @@ function filteredOpportunities() {
 
 function renderOpportunityTable() {
   const rows = filteredOpportunities();
+  const filtered = state.opportunities.length > 0 && rows.length === 0;
+  $("#opportunitiesEmptyCopy").textContent = filtered
+    ? "No results match the selected filters."
+    : "No live comparison currently passes every qualification rule.";
   $("#opportunitiesEmpty").classList.toggle("hidden", rows.length > 0);
   $("#opportunitiesTable").innerHTML = rows.length ? `<table><thead><tr><th>Event</th><th>Market</th><th>Prediction</th><th>Sportsbook</th><th>Ask</th><th>Implied</th><th>Edge</th><th>Quality</th></tr></thead><tbody>
   ${rows.map(o => `<tr><td data-label="Match"><span class="cell-main">${esc(o.home_team)} vs ${esc(o.away_team)}</span><span class="cell-sub">${esc(o.competition)}</span></td>
@@ -196,5 +319,17 @@ $("#refreshButton").addEventListener("click", () => refresh(true));
 ["opSportFilter","opMarketFilter","opProviderFilter","opBookFilter"].forEach(id => $(`#${id}`).addEventListener("change", renderOpportunityTable));
 $("#opSearch").addEventListener("input", renderOpportunityTable);
 ["candidateSportFilter","candidateStatusFilter","candidateReasonFilter","candidateMarketFilter"].forEach(id => $(`#${id}`).addEventListener("change", renderCandidates));
+$("#unmatchedProviderFilter").addEventListener("change", () => {
+  state.unmatchedPage = 1;
+  renderUnmatchedEvents();
+});
+$("#unmatchedPrevious").addEventListener("click", () => {
+  state.unmatchedPage = Math.max(1, state.unmatchedPage - 1);
+  renderUnmatchedEvents();
+});
+$("#unmatchedNext").addEventListener("click", () => {
+  state.unmatchedPage += 1;
+  renderUnmatchedEvents();
+});
 refresh();
 state.refreshTimer = setInterval(refresh, 30000);

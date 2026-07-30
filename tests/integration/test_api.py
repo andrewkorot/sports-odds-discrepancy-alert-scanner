@@ -48,7 +48,9 @@ async def test_dashboard_and_static_assets(client: AsyncClient) -> None:
     assert stylesheet.status_code == 200
     assert "mobile-nav" in stylesheet.text
     assert script.status_code == 200
-    assert 'fetchJson("/opportunities")' in script.text
+    assert 'get("/opportunities")' in script.text
+    assert 'get("/event-matches")' in script.text
+    assert (await client.get("/event-matches")).status_code == 200
 
 
 @pytest.mark.asyncio

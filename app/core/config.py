@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     discovery_interval_seconds: int = 300
     price_poll_interval_seconds: int = 30
     event_match_kickoff_tolerance_minutes: int = 15
+    event_match_fuzzy_min_score: Decimal = Decimal("80")
+    event_match_ambiguity_margin: Decimal = Decimal("5")
     alert_dedupe_ttl_seconds: int = 900
     alert_edge_change_threshold: Decimal = Decimal("0.01")
     telegram_bot_token: str | None = None

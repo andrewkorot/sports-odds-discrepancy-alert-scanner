@@ -3,8 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, Response
 
 from app.api.routes import router
 from app.core.config import Settings, get_settings
@@ -15,6 +14,9 @@ from app.services.scanner import ScannerState
 def create_app(settings: Settings | None = None) -> FastAPI:
     configured = settings or get_settings()
     static_dir = Path(__file__).parent / "static"
+    dashboard_html = (static_dir / "dashboard.html").read_text()
+    dashboard_css = (static_dir / "dashboard.css").read_text()
+    dashboard_js = (static_dir / "dashboard.js").read_text()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -33,11 +35,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     @app.get("/", include_in_schema=False)
-    async def dashboard() -> FileResponse:
-        return FileResponse(static_dir / "dashboard.html")
+    async def dashboard() -> HTMLResponse:
+        return HTMLResponse(dashboard_html)
+
+    @app.get("/static/dashboard.css", include_in_schema=False)
+    async def dashboard_styles() -> Response:
+        return Response(dashboard_css, media_type="text/css")
+
+    @app.get("/static/dashboard.js", include_in_schema=False)
+    async def dashboard_script() -> Response:
+        return Response(dashboard_js, media_type="text/javascript")
 
     app.include_router(router)
     return app

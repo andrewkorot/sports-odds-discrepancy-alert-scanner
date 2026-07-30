@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 import time
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -55,10 +56,13 @@ class KalshiRequestSigner:
 class KalshiEventPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
     event_ticker: str
+    series_ticker: str
     title: str
+    sub_title: str | None = None
     category: str | None = None
     strike_date: datetime | None = None
     status: str = "open"
+    product_metadata: dict[str, Any] = Field(default_factory=dict)
     markets: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -72,6 +76,8 @@ class KalshiMarketPayload(BaseModel):
     no_sub_title: str = "No"
     status: str
     close_time: datetime | None = None
+    occurrence_datetime: datetime | None = None
+    primary_participant_key: str | None = None
     volume_24h_fp: Decimal | None = None
 
 
@@ -100,6 +106,7 @@ class KalshiConnector:
         self._health = ProviderHealthRecord(
             provider=Provider.KALSHI, mode=mode, enabled=True, connected=False
         )
+        self._soccer_game_series_cache: set[str] | None = None
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         started = perf_counter()
@@ -140,6 +147,13 @@ class KalshiConnector:
     ) -> list[ProviderEvent]:
         cursor = ""
         records: list[ProviderEvent] = []
+        soccer_game_series = await self._soccer_game_series()
+        print(
+            "//////////////////////// kalshi discover_events start_time:",
+            start_time,
+            "end_time:",
+            end_time,
+        )
         while True:
             payload = cast(
                 dict[str, Any],
@@ -154,30 +168,113 @@ class KalshiConnector:
                     },
                 ),
             )
+            # print(f"Discovered events: {len(payload.get('events', []))}")
             for raw in payload.get("events", []):
                 event = KalshiEventPayload.model_validate(raw)
-                scheduled = event.strike_date
-                if scheduled and not start_time <= scheduled <= end_time:
+                if event.series_ticker not in soccer_game_series:
                     continue
-                searchable = f"{event.category or ''} {event.title}".casefold()
-                if not any(term in searchable for term in ("soccer", "mls", "premier league")):
+                markets = [KalshiMarketPayload.model_validate(item) for item in event.markets]
+                occurrence_times = [
+                    market.occurrence_datetime
+                    for market in markets
+                    if market.occurrence_datetime is not None
+                ]
+                scheduled = min(occurrence_times) if occurrence_times else event.strike_date
+                if scheduled is None or not start_time <= scheduled <= end_time:
                     continue
+                extracted = self.extract_participants(event, markets)
+                if extracted is None:
+                    continue
+                participant_one, participant_two, source = extracted
+                competition = str(event.product_metadata.get("competition") or "").strip()
                 records.append(
                     ProviderEvent(
                         provider=Provider.KALSHI,
                         provider_event_id=event.event_ticker,
                         title=event.title,
-                        category=event.category,
+                        category=competition or event.category,
+                        sport="soccer",
+                        competition=competition or None,
+                        participant_one=participant_one,
+                        participant_two=participant_two,
+                        orientation_known=False,
+                        extraction_source=source,
                         scheduled_start=scheduled,
                         status=event.status,
-                        raw_market_ids=[str(item.get("ticker")) for item in event.markets],
+                        raw_market_ids=[market.ticker for market in markets],
                     )
                 )
             cursor = str(payload.get("cursor") or "")
             if not cursor:
                 break
         self._health = self._health.model_copy(update={"events_discovered": len(records)})
+        print(f"Total events discovered: {len(records)}")
+        print(records)
         return records
+
+    async def _soccer_game_series(self) -> set[str]:
+        if self._soccer_game_series_cache is not None:
+            return self._soccer_game_series_cache
+        payload = cast(
+            dict[str, Any],
+            await self._get(
+                "/series",
+                {
+                    "category": "Sports",
+                    "tags": "Soccer",
+                    "include_product_metadata": "true",
+                },
+            ),
+        )
+        self._soccer_game_series_cache = {
+            str(item["ticker"])
+            for item in payload.get("series", [])
+            if str(item.get("category", "")).casefold() == "sports"
+            and "soccer" in {str(tag).casefold() for tag in item.get("tags", [])}
+            and str((item.get("product_metadata") or {}).get("scope", "")).casefold() == "game"
+        }
+        return self._soccer_game_series_cache
+
+    @staticmethod
+    def extract_participants(
+        event: KalshiEventPayload, markets: list[KalshiMarketPayload]
+    ) -> tuple[str, str, str] | None:
+        """Extract an unordered team pair without parsing Kalshi ticker conventions."""
+
+        metadata = event.product_metadata
+        for first_key, second_key in (
+            ("home_team", "away_team"),
+            ("homeTeam", "awayTeam"),
+            ("participant_1", "participant_2"),
+            ("participant1", "participant2"),
+        ):
+            first = str(metadata.get(first_key) or "").strip()
+            second = str(metadata.get(second_key) or "").strip()
+            if first and second and first.casefold() != second.casefold():
+                return first, second, f"product_metadata:{first_key},{second_key}"
+
+        for text, source in (
+            (event.title, "event_title"),
+            (event.sub_title or "", "event_sub_title"),
+        ):
+            parts = re.split(r"\s+(?:vs?\.?|at|@)\s+", text, maxsplit=1, flags=re.IGNORECASE)
+            if len(parts) == 2:
+                first = parts[0].strip(" -:()")
+                second = re.sub(r"\s+\([^)]*\)$", "", parts[1]).strip(" -:()")
+                if first and second and first.casefold() != second.casefold():
+                    return first, second, source
+
+        excluded = {"yes", "no", "draw", "tie"}
+        outcomes = list(
+            dict.fromkeys(
+                market.yes_sub_title.strip()
+                for market in markets
+                if market.yes_sub_title.strip().casefold() not in excluded
+            )
+        )
+        if len(outcomes) == 2:
+            return outcomes[0], outcomes[1], "market_yes_sub_titles"
+        return None
 
     async def discover_markets(self, event_id: str) -> list[ProviderMarket]:
         payload = cast(

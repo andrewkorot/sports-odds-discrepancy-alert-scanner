@@ -9,6 +9,7 @@ from app.domain.models import (
     Bookmaker,
     CanonicalEvent,
     ConnectorHealth,
+    EventMatchAudit,
     MarketCandidate,
     Opportunity,
     PredictionMarketQuote,
@@ -35,19 +36,32 @@ class HealthResponse(BaseModel):
     provider_statuses: dict[str, str]
     required_bookmaker_coverage: dict[str, str]
     last_successful_update: str | None
+    last_scan_error: str | None = None
 
 
 @router.get("/health", response_model=HealthResponse)
 async def health(request: Request) -> HealthResponse:
     scanner = state(request)
+    database_status, redis_status = await orchestrator(request).infrastructure_health()
+    provider_records = await orchestrator(request).health()
     coverage = {b.canonical_id: b.availability_status.value for b in scanner.bookmakers}
     return HealthResponse(
-        application_status="ok",
-        database_status="mock" if scanner.settings.mock_mode else "configured",
-        redis_status="mock" if scanner.settings.mock_mode else "configured",
-        provider_statuses={"kalshi": "mock", "polymarket": "mock", "oddspapi": "mock"},
+        application_status=(
+            "ok"
+            if database_status in {"ok", "mock"} and redis_status in {"ok", "mock"}
+            else "degraded"
+        ),
+        database_status=database_status,
+        redis_status=redis_status,
+        provider_statuses={
+            record.provider.value: (
+                "connected" if record.connected else ("disabled" if not record.enabled else "error")
+            )
+            for record in provider_records
+        },
         required_bookmaker_coverage=coverage,
         last_successful_update=scanner.last_updated.isoformat() if scanner.last_updated else None,
+        last_scan_error=orchestrator(request).last_scan_error,
     )
 
 
@@ -60,6 +74,22 @@ async def bookmakers(request: Request) -> list[Bookmaker]:
 async def events(request: Request, sport: str | None = None) -> list[CanonicalEvent]:
     return [
         item for item in state(request).events if sport is None or item.sport == sport.casefold()
+    ]
+
+
+@router.get("/event-matches", response_model=list[EventMatchAudit])
+async def event_matches(
+    request: Request,
+    matched: bool | None = None,
+    provider: str | None = None,
+    confidence: str | None = None,
+) -> list[EventMatchAudit]:
+    return [
+        item
+        for item in state(request).event_matches
+        if (matched is None or item.matched is matched)
+        and (provider is None or item.provider.value == provider.casefold())
+        and (confidence is None or item.match_confidence.value == confidence.casefold())
     ]
 
 

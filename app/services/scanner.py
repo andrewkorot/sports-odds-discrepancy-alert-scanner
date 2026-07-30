@@ -5,6 +5,7 @@ from app.core.config import Settings
 from app.domain.models import (
     Bookmaker,
     CanonicalEvent,
+    EventMatchAudit,
     MarketCandidate,
     Opportunity,
     PredictionMarketQuote,
@@ -12,6 +13,7 @@ from app.domain.models import (
 )
 from app.providers.mock.data import mock_order_books, mock_snapshot
 from app.services.clock import Clock, SystemClock
+from app.services.live_pipeline import LiveScanSnapshot
 from app.services.opportunity_detector import evaluate_candidates, opportunities_from_candidates
 
 
@@ -25,6 +27,7 @@ class ScannerState:
         self.bookmakers: list[Bookmaker] = []
         self.opportunities: list[Opportunity] = []
         self.candidates: list[MarketCandidate] = []
+        self.event_matches: list[EventMatchAudit] = []
         self.last_updated: datetime | None = None
 
     async def refresh(self, now: datetime | None = None) -> None:
@@ -38,6 +41,7 @@ class ScannerState:
         self.predictions = predictions
         self.sportsbooks = sportsbooks
         self.bookmakers = bookmakers
+        self.event_matches = []
         order_books = mock_order_books(predictions)
         self.candidates = evaluate_candidates(
             predictions, sportsbooks, bookmakers, self.settings, current, order_books
@@ -95,3 +99,13 @@ class ScannerState:
             )
         self.opportunities = opportunities_from_candidates(self.candidates, self.settings)
         self.last_updated = current
+
+    def apply_live_snapshot(self, snapshot: LiveScanSnapshot, updated_at: datetime) -> None:
+        self.events = snapshot.events
+        self.predictions = snapshot.predictions
+        self.sportsbooks = snapshot.sportsbooks
+        self.bookmakers = snapshot.bookmakers
+        self.candidates = snapshot.candidates
+        self.opportunities = snapshot.opportunities
+        self.event_matches = snapshot.event_matches
+        self.last_updated = updated_at

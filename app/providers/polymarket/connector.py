@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from decimal import Decimal
 from time import perf_counter
@@ -43,6 +44,8 @@ class GammaMarketPayload(BaseModel):
     clobTokenIds: list[str]
     outcomes: list[str]
     endDate: datetime | None = None
+    eventStartTime: datetime | None = None
+    sportsMarketType: str | None = None
     volume24hr: Decimal | None = None
 
     @field_validator("clobTokenIds", "outcomes", mode="before")
@@ -59,6 +62,11 @@ class GammaEventPayload(BaseModel):
     closed: bool = False
     startDate: datetime | None = None
     endDate: datetime | None = None
+    startTime: datetime | None = None
+    live: bool = False
+    ended: bool = False
+    series: list[dict[str, Any]] = Field(default_factory=list)
+    teams: list[dict[str, Any]] = Field(default_factory=list)
     markets: list[GammaMarketPayload] = Field(default_factory=list)
     tags: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -126,7 +134,14 @@ class PolymarketConnector:
         self, start_time: datetime, end_time: datetime
     ) -> list[ProviderEvent]:
         cursor = ""
+        seen_cursors: set[str] = set()
         records: list[ProviderEvent] = []
+        print(
+            "//////////////////////// polymarket discover_events start_time:",
+            start_time,
+            "end_time:",
+            end_time,
+        )
         while True:
             payload = cast(
                 dict[str, Any],
@@ -135,44 +150,129 @@ class PolymarketConnector:
                     {
                         "active": "true",
                         "closed": "false",
+                        "tag_slug": "soccer",
                         "start_time_min": start_time.isoformat(),
                         "start_time_max": end_time.isoformat(),
-                        "limit": 100,
+                        "limit": 500,
                         **({"after_cursor": cursor} if cursor else {}),
                     },
                 ),
             )
             for raw in payload.get("events", []):
                 event = GammaEventPayload.model_validate(raw)
-                searchable = " ".join(
-                    [event.title, *(str(tag.get("label", "")) for tag in event.tags)]
-                ).casefold()
-                if not any(term in searchable for term in ("soccer", "mls", "premier league")):
+                if event.live or event.ended:
                     continue
-                scheduled = event.startDate or event.endDate
-                if scheduled and not start_time <= scheduled <= end_time:
+                eligible_markets = [
+                    market
+                    for market in event.markets
+                    if market.active
+                    and not market.closed
+                    and market.enableOrderBook
+                    and (market.sportsMarketType or "").casefold() == "moneyline"
+                ]
+                if not eligible_markets:
                     continue
+                tag_labels = [
+                    str(tag.get("label", "")).strip()
+                    for tag in event.tags
+                    if str(tag.get("label", "")).strip()
+                ]
+                scheduled = self.fixture_start(event, eligible_markets)
+                if scheduled is None or not start_time <= scheduled <= end_time:
+                    continue
+                home_team, away_team = self.ordered_teams(event)
+                if home_team is None or away_team is None:
+                    continue
+                competition = self.competition_name(event, tag_labels)
                 records.append(
                     ProviderEvent(
                         provider=Provider.POLYMARKET,
                         provider_event_id=event.id,
                         title=event.title,
-                        category="soccer",
+                        category=competition,
+                        sport="soccer",
+                        competition=competition,
+                        home_team=home_team,
+                        away_team=away_team,
                         scheduled_start=scheduled,
                         status="open" if event.active and not event.closed else "closed",
-                        raw_market_ids=[market.id for market in event.markets],
+                        raw_market_ids=[market.id for market in eligible_markets],
                     )
                 )
-            cursor = str(payload.get("next_cursor") or "")
-            if not cursor:
+            next_cursor = str(payload.get("next_cursor") or "")
+            if not next_cursor or next_cursor in seen_cursors:
                 break
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
         self._health = self._health.model_copy(update={"events_discovered": len(records)})
+        print(f"Total events discovered: {len(records)}")
+        print(records)
         return records
+
+    @staticmethod
+    def fixture_start(
+        event: GammaEventPayload, eligible_markets: list[GammaMarketPayload]
+    ) -> datetime | None:
+        """Return fixture kickoff without treating Gamma's creation startDate as kickoff."""
+
+        if event.startTime is not None:
+            return event.startTime
+        market_start_times = [
+            market.eventStartTime
+            for market in eligible_markets
+            if market.eventStartTime is not None
+        ]
+        if market_start_times:
+            return min(market_start_times)
+        if event.endDate is not None:
+            return event.endDate
+        market_end_times = [
+            market.endDate for market in eligible_markets if market.endDate is not None
+        ]
+        return min(market_end_times) if market_end_times else None
+
+    @staticmethod
+    def ordered_teams(event: GammaEventPayload) -> tuple[str | None, str | None]:
+        ordered = {
+            str(team.get("ordering", "")).casefold(): str(team.get("name", "")).strip()
+            for team in event.teams
+            if str(team.get("name", "")).strip()
+        }
+        home = ordered.get("home")
+        away = ordered.get("away")
+        if home and away:
+            return home, away
+        title_parts = [
+            part.strip(" -:")
+            for part in re.split(r"\s+vs?\.?\s+", event.title, maxsplit=1, flags=re.IGNORECASE)
+        ]
+        if len(title_parts) == 2 and all(title_parts):
+            return title_parts[0], title_parts[1]
+        return None, None
+
+    @staticmethod
+    def competition_name(event: GammaEventPayload, tag_labels: list[str]) -> str:
+        for series in event.series:
+            title = str(series.get("title", "")).strip()
+            if title:
+                return title
+        return next(
+            (
+                label
+                for label in tag_labels
+                if label.casefold() not in {"soccer", "sports", "games"}
+            ),
+            "Soccer",
+        )
 
     async def discover_markets(self, event_id: str) -> list[ProviderMarket]:
         raw = cast(dict[str, Any], await self._get(f"{self._gamma}/events/{event_id}"))
         event = GammaEventPayload.model_validate(raw)
-        records = [self.parse_market(event.id, market) for market in event.markets]
+        records = [
+            self.parse_market(event.id, market)
+            for market in event.markets
+            if (market.sportsMarketType or "").casefold() == "moneyline"
+        ]
         self._health = self._health.model_copy(update={"markets_discovered": len(records)})
         return records
 

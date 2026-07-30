@@ -11,6 +11,24 @@ def format_telegram_alert(
     predictions: Sequence[PredictionMarketQuote],
     sportsbooks: Sequence[SportsbookQuote],
 ) -> str:
+    matching_predictions = [
+        quote
+        for quote in predictions
+        if quote.canonical_event_id == best.canonical_event_id
+        and quote.market_type == best.market_type
+        and quote.selection == best.selection
+        and quote.line == best.line
+        and quote.participant == best.participant
+    ]
+    matching_sportsbooks = [
+        quote
+        for quote in sportsbooks
+        if quote.canonical_event_id == best.canonical_event_id
+        and quote.market_type == best.market_type
+        and quote.selection == best.selection
+        and quote.line == best.line
+        and quote.participant == best.participant
+    ]
     selection = best.selection.value.title()
     if best.participant:
         selection = best.participant
@@ -25,11 +43,11 @@ def format_telegram_alert(
         f"Bid: {q.best_bid_probability:.1%} × {q.best_bid_size:,.0f}\n"
         f"Ask: {q.best_ask_probability:.1%} × {q.best_ask_size:,.0f}"
         + (" — used for edge" if q.provider == best.prediction_market_provider else "")
-        for q in predictions
+        for q in matching_predictions
     )
     sportsbook_lines = "\n".join(
         f"{q.bookmaker_display_name}: {q.decimal_odds:.2f} → {q.implied_probability:.2%}"
-        for q in sportsbooks
+        for q in matching_sportsbooks
     )
     links = "\n".join(
         link for link in [best.prediction_market_direct_url, best.sportsbook_direct_url] if link

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+import httpx
+
 from app.core.config import Settings, get_settings
 from app.providers.oddspapi.client import OddsPapiClient
 from app.providers.oddspapi.mapping import CANONICAL_BOOKMAKERS, map_provider_bookmakers
@@ -28,7 +30,14 @@ async def run() -> int:
     api_key, base_url = connection
     client = OddsPapiClient(api_key, base_url)
     try:
-        mapped, unknown = map_provider_bookmakers(await client.list_bookmakers())
+        try:
+            mapped, unknown = map_provider_bookmakers(await client.list_bookmakers())
+        except httpx.HTTPStatusError as exc:
+            print(f"OddsPapi verification failed: HTTP {exc.response.status_code}")
+            return 2
+        except (httpx.RequestError, ValueError) as exc:
+            print(f"OddsPapi verification failed: {type(exc).__name__}")
+            return 2
     finally:
         await client.aclose()
     found = {item.canonical_id for item in mapped if item.availability_status == "available"}

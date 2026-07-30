@@ -28,5 +28,6 @@ def test_live_mode_still_requires_kalshi_credentials() -> None:
             kalshi_mode="live",
             oddspapi_api_key="odds-key",
             kalshi_api_key=None,
+            kalshi_api_key_id=None,
             kalshi_private_key_path=None,
         )

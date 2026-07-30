@@ -19,7 +19,7 @@ uvicorn app.main:app --reload
 ```
 
 Mock mode requires no external credentials. Visit `/docs`, `/health`,
-`/bookmakers`, `/events`, `/opportunities`, `/settings`, and
+`/bookmakers`, `/events`, `/event-matches`, `/opportunities`, `/settings`,
 `/connector-health`, and `/market-candidates`.
 
 For PostgreSQL and Redis:
@@ -55,8 +55,8 @@ Every variable is also present in `.env.example`.
 | `MOCK_MODE` | Deterministic providers; no credentials (`true`) |
 | `DATABASE_URL` | SQLAlchemy async PostgreSQL URL |
 | `REDIS_URL` | Redis connection URL |
-| `SPORTS_ODDS_API_KEY` | OddsPapi v5 key when its mode is live |
-| `SPORTS_ODDS_BASE_URL` | Official localized OddsPapi v5 base URL |
+| `SPORTS_ODDS_API_KEY` | OddsPapi consumer v4 key when its mode is live |
+| `SPORTS_ODDS_BASE_URL` | OddsPapi consumer v4 base URL |
 | `KALSHI_API_KEY_ID` | Read-scoped Kalshi API key ID |
 | `KALSHI_PRIVATE_KEY_PATH` | Kalshi signing key path, live mode only |
 | `KALSHI_MODE` | `mock`, `live`, or `disabled` |
@@ -87,6 +87,8 @@ Every variable is also present in `.env.example`.
 | `PRICE_POLL_INTERVAL_SECONDS` | Recurring scan interval (`30`) |
 | `DISCOVERY_INTERVAL_SECONDS` | Full discovery interval (`300`) |
 | `EVENT_MATCH_KICKOFF_TOLERANCE_MINUTES` | Cross-provider kickoff tolerance (`15`) |
+| `EVENT_MATCH_FUZZY_MIN_SCORE` | Minimum weighted score for a manual-review candidate (`80`) |
+| `EVENT_MATCH_AMBIGUITY_MARGIN` | Minimum lead over the runner-up candidate (`5`) |
 | `ALERT_DEDUPE_TTL_SECONDS` | Unchanged-alert suppression (`900`) |
 | `ALERT_EDGE_CHANGE_THRESHOLD` | Material edge change as probability (`0.01`) |
 
@@ -116,9 +118,13 @@ account catalog. Unknown provider names are counted and never silently converted
 to another bookmaker. Missing bookmakers get no zero, null-as-zero, fallback, or
 fabricated quote.
 
-The read-only connectors implement the documented transport contracts. Their
-provider-to-canonical soccer market mapping still requires validation with
-sanitized real responses before live opportunities can be enabled.
+The first live normalization path deliberately accepts only soccer pregame,
+full-time `1x2` selections from the OddsPapi market catalog. Prediction-market
+titles must identify the matching home team, away team, or draw and must not
+contain qualification, extra-time, penalty, first-half, handicap, total,
+double-chance, or draw-no-bet language. Ambiguous markets are skipped rather
+than guessed. Totals, spreads, and BTTS remain available in deterministic mock
+mode but are not enabled in the first live path.
 
 ## Development
 
@@ -133,14 +139,30 @@ The PostgreSQL schema covers bookmakers and aliases, competitions and aliases,
 teams and aliases, canonical/provider events and markets, mappings, both quote
 types, order-book snapshots and levels, candidate qualification audits,
 opportunities, alert history, system settings, and connector health.
-Redis is intended for current scan state and short-lived alert deduplication;
-mock mode uses deterministic in-process state.
+In live mode PostgreSQL stores normalized events, provider events and markets,
+quotes, order books and levels, candidate decisions, opportunities, connector
+health, and alert history. Redis stores active alert keys, cooldown state, edge
+state, and disappearance/reappearance state. Mock mode remains deterministic
+and uses in-process state.
 
 `GET /opportunities` supports `market_type`, bookmaker, prediction market,
 competition, minimum edge, and active-only filtering. `GET /market-candidates`
 exposes accepted and rejected evaluations and supports market type, acceptance,
 rejection reason, and provider filters. Candidate detail includes the full
 liquidity qualification and ordered rejection reasons.
+
+`GET /event-matches` exposes the event-matching audit and can filter by
+`matched`, `provider`, and `confidence`. Exact and explicitly approved alias
+matches may proceed automatically. Similar-name fuzzy candidates are labeled
+`manual_review` and never produce prices, opportunities, or alerts. Fallback
+matching uses RapidFuzz with weighted home/away participants, competition,
+kickoff, and sport scores. Team qualifiers such as women, U21/U23, reserves,
+II, B team, academy, and esports are preserved and conflicting qualifiers are
+hard rejections. Competition country, gender, age group, and league-level
+metadata are also checked when providers supply them. Close runner-up scores
+fail the ambiguity margin and remain manual review. Persisted provider-event
+mappings are reused on later scans only after the current event still passes
+identity, competition, kickoff, sport, qualifier, and settlement safeguards.
 
 ## Read-only provider architecture
 
@@ -156,8 +178,20 @@ OddsPapi ────┘                                           ├─ REST A
 ```
 
 `KalshiConnector` supports signed, read-only event/market discovery, order-book
-snapshots, pagination, and recent public trades. `PolymarketConnector` uses the
+snapshots, pagination, and recent public trades. Soccer discovery uses Kalshi's
+official `Sports` category plus `Soccer` series tag and admits only series whose
+product-metadata scope is `Game`. Participants are extracted from structured
+metadata, explicit event/subtitle matchups, or exactly two market YES outcome
+names. Because Kalshi does not guarantee home/away ordering, the pair remains
+unordered until one unique OddsPapi fixture supplies canonical orientation;
+ambiguous and fuzzy candidates require manual review. `PolymarketConnector` uses the
 public Gamma, CLOB, and Data APIs and never accepts a wallet, signer, or API key.
+Its soccer discovery uses Gamma's `tag_slug=soccer` and documented
+`start_time_min`/`start_time_max` window. Fixture kickoff comes from
+event-level `startTime`, then nested market `eventStartTime`, with end-time
+fields used only as fallbacks; Gamma `startDate` is never treated as kickoff.
+Ordered Gamma teams and series metadata supply home/away and competition, and
+only open, order-book-enabled `moneyline` markets enter the scanner.
 `SportsOddsConnector` retrieves OddsPapi soccer fixtures, bookmaker coverage,
 and current fixture odds. No connector contains order, balance, position,
 portfolio, wallet, transaction-signing, or sportsbook-betting methods.
@@ -175,7 +209,8 @@ the supported live synchronization path. WebSocket flags default to false;
 sequence-aware snapshot recovery is not yet implemented, so WebSocket
 availability never blocks REST mode.
 
-The application scans once at startup and then every
+The application scans from the current UTC time through
+`MAX_HOURS_BEFORE_KICKOFF` (72 hours by default), once at startup and then every
 `PRICE_POLL_INTERVAL_SECONDS`. Telegram is output-only and delivery occurs only
 when all three conditions are true:
 
@@ -186,7 +221,23 @@ TELEGRAM_ENABLED=true
 ```
 
 The default live dry-run retrieves data and exposes results without Telegram
-delivery.
+delivery. A live polling cycle performs:
+
+```text
+OddsPapi fixtures and market catalog
+→ fixture odds for configured bookmakers
+→ Kalshi/Polymarket event and market discovery
+→ executable order books and verified/reconstructed volume
+→ deterministic event and settlement matching
+→ independent edge and qualification calculation
+→ atomic PostgreSQL persistence
+→ Redis disappearance/cooldown/re-alert gate
+→ optional Telegram delivery and alert history
+```
+
+One failed prediction provider or one missing bookmaker does not fabricate data
+and does not prevent other available providers or bookmakers from being
+processed. OddsPapi is the required event/odds anchor for a comparison cycle.
 
 Additional monitoring endpoints:
 

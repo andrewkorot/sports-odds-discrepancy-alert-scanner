@@ -52,7 +52,7 @@ def mock_snapshot(
     list[Bookmaker],
 ]:
     now = now or datetime.now(UTC)
-    kickoff = now + timedelta(hours=4)
+    kickoff = now + timedelta(hours=2)
     event = CanonicalEvent(
         id=EVENT_ID,
         competition="MLS",

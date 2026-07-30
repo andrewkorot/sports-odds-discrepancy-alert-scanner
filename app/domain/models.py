@@ -44,6 +44,39 @@ class CanonicalEvent(DomainModel):
         return value.strip().casefold()
 
 
+class EventMatchAudit(DomainModel):
+    """Auditable provider-event matching result exposed to operators."""
+
+    provider: Provider
+    provider_event_id: str
+    title: str
+    competition: str | None = None
+    home_team: str | None = None
+    away_team: str | None = None
+    participant_one: str | None = None
+    participant_two: str | None = None
+    normalized_participant_one: str | None = None
+    normalized_participant_two: str | None = None
+    orientation_known: bool = True
+    extraction_source: str | None = None
+    normalized_competition: str | None = None
+    normalized_home_team: str | None = None
+    normalized_away_team: str | None = None
+    kickoff_time_utc: datetime | None = None
+    matched: bool = False
+    match_confidence: MatchConfidence = MatchConfidence.REJECTED
+    sportsbook_event_id: str | None = None
+    sportsbook_title: str | None = None
+    sportsbook_competition: str | None = None
+    sportsbook_home_team: str | None = None
+    sportsbook_away_team: str | None = None
+    sportsbook_kickoff_time_utc: datetime | None = None
+    weighted_score: Decimal | None = None
+    runner_up_score: Decimal | None = None
+    score_breakdown: dict[str, Decimal] = Field(default_factory=dict)
+    rejection_reasons: list[str] = Field(default_factory=list)
+
+
 class PredictionMarketQuote(DomainModel):
     provider: Provider
     provider_event_id: str
