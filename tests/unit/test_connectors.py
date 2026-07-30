@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from pydantic import ValidationError
 
 from app.domain.enums import Selection, VolumeSource
 from app.providers.kalshi.connector import KalshiConnector
+from app.providers.oddspapi.connector import SportsOddsConnector
 from app.providers.polymarket.connector import PolymarketConnector
 from app.services.provider_normalization import normalize_order_book
 
@@ -94,3 +96,81 @@ async def test_polymarket_public_orderbook_parsing() -> None:
 def test_malformed_provider_payload_is_rejected() -> None:
     with pytest.raises((ValidationError, ValueError)):
         PolymarketConnector.parse_market("event-1", {"id": "incomplete"})
+
+
+@pytest.mark.asyncio
+async def test_oddspapi_v4_fixture_discovery_contract() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v4/fixtures"
+        assert request.url.params["apiKey"] == "secret"
+        assert request.url.params["sportId"] == "10"
+        assert request.url.params["statusId"] == "0"
+        assert request.url.params["hasOdds"] == "true"
+        assert "from" in request.url.params and "to" in request.url.params
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "fixtureId": "fixture-1",
+                    "participant1Name": "Inter Miami CF",
+                    "participant2Name": "Atlanta United",
+                    "tournamentName": "MLS",
+                    "startTime": "2026-07-30T20:00:00.000Z",
+                    "statusId": 0,
+                    "statusName": "Pre-Game",
+                    "sportName": "Soccer",
+                }
+            ],
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    connector = SportsOddsConnector("secret", "https://api.oddspapi.io/v4", ["pinnacle"], client)
+    start = datetime(2026, 7, 30, 12, tzinfo=UTC)
+    events = await connector.discover_events(start, start + timedelta(hours=24))
+    assert events[0].provider_event_id == "fixture-1"
+    assert events[0].title == "Inter Miami CF vs Atlanta United"
+    assert events[0].scheduled_start == datetime(2026, 7, 30, 20, tzinfo=UTC)
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_oddspapi_v4_odds_contract_and_nested_mapping() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v4/odds"
+        assert request.url.params["fixtureId"] == "fixture-1"
+        return httpx.Response(
+            200,
+            json={
+                "bookmakerOdds": {
+                    "pinnacle": {
+                        "markets": {
+                            "101": {
+                                "marketActive": True,
+                                "outcomes": {
+                                    "102": {
+                                        "players": {
+                                            "0": {
+                                                "active": True,
+                                                "bookmakerOutcomeId": "home",
+                                                "changedAt": "2026-07-30T12:00:00.000Z",
+                                                "price": 2.15,
+                                                "mainLine": True,
+                                            }
+                                        }
+                                    }
+                                },
+                            }
+                        }
+                    }
+                }
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    connector = SportsOddsConnector("secret", "https://api.oddspapi.io/v4", ["pinnacle"], client)
+    quotes = await connector.get_event_odds("fixture-1")
+    assert quotes[0].market_id == 101
+    assert quotes[0].provider_outcome_id == 102
+    assert quotes[0].decimal_odds == Decimal("2.15")
+    assert quotes[0].changed_at == datetime(2026, 7, 30, 12, tzinfo=UTC)
+    await client.aclose()

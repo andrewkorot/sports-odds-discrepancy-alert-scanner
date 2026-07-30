@@ -19,7 +19,7 @@ class OddsPapiClient:
     """Confirmed v5 REST boundary; credential is only sent as a query parameter."""
 
     def __init__(
-        self, api_key: str, base_url: str = "https://v5.oddspapi.io/en", timeout: float = 15
+        self, api_key: str, base_url: str = "https://api.oddspapi.io/v4", timeout: float = 15
     ) -> None:
         self._api_key = api_key
         self._client = httpx.AsyncClient(base_url=base_url, timeout=timeout)
@@ -45,8 +45,7 @@ class OddsPapiClient:
         return list(await self._get("/fixtures", **filters))
 
     async def get_fixture_odds(self, fixture_id: str) -> Any:
-        # Confirmed by the v5 OpenAPI. Mapping remains at the provider boundary.
-        return await self._get(f"/fixtures/{fixture_id}/odds")
+        return await self._get("/odds", fixtureId=fixture_id)
 
     async def aclose(self) -> None:
         await self._client.aclose()

@@ -59,9 +59,7 @@ async def bookmakers(request: Request) -> list[Bookmaker]:
 @router.get("/events", response_model=list[CanonicalEvent])
 async def events(request: Request, sport: str | None = None) -> list[CanonicalEvent]:
     return [
-        item
-        for item in state(request).events
-        if sport is None or item.sport == sport.casefold()
+        item for item in state(request).events if sport is None or item.sport == sport.casefold()
     ]
 
 

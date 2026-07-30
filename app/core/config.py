@@ -18,9 +18,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://scanner:scanner@postgres:5432/scanner"
     redis_url: str = "redis://redis:6379/0"
     sports_odds_api_key: str | None = None
-    sports_odds_base_url: str = "https://v5.oddspapi.io/en"
+    sports_odds_base_url: str = "https://api.oddspapi.io/v4"
     oddspapi_api_key: str | None = None  # Backward-compatible alias.
-    oddspapi_base_url: str = "https://v5.oddspapi.io/en"
+    oddspapi_base_url: str = "https://api.oddspapi.io/v4"
     kalshi_api_key_id: str | None = None
     kalshi_api_key: str | None = None  # Backward-compatible alias.
     kalshi_private_key_path: str | None = None

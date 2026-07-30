@@ -101,8 +101,8 @@ and settlement mappings before it should be enabled in live mode.
 
 ## OddsPapi status
 
-The REST client uses the current official v5 contract:
-`https://v5.oddspapi.io/en`, query parameter `apiKey`, and catalog endpoint
+The REST client uses the official consumer v4 contract:
+`https://api.oddspapi.io/v4`, query parameter `apiKey`, and catalog endpoint
 `GET /bookmakers`. Provider slugs remain separate from canonical IDs.
 
 Run credentialed coverage verification:
@@ -222,3 +222,20 @@ manually.
 Kalshi requires a read-scoped API key ID and RSA private key for its documented
 market-data endpoints. Polymarket public market data requires no credentials.
 OddsPapi requires `SPORTS_ODDS_API_KEY`.
+
+## Host development with Docker infrastructure
+
+To run the scanner and Alembic directly on the host while keeping only
+PostgreSQL and Redis in Docker:
+
+```bash
+docker compose up -d postgres redis
+cp .env.local-live.example .env
+# Fill SPORTS_ODDS_API_KEY and any enabled Kalshi credentials.
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+Host processes must connect to `localhost:5432` and `localhost:6379`.
+The hostnames `postgres` and `redis` are Compose service names and resolve only
+inside the Compose network.

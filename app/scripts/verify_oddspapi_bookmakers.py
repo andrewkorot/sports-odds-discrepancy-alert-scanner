@@ -2,9 +2,18 @@ from __future__ import annotations
 
 import asyncio
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.providers.oddspapi.client import OddsPapiClient
 from app.providers.oddspapi.mapping import CANONICAL_BOOKMAKERS, map_provider_bookmakers
+
+
+def oddspapi_connection(settings: Settings) -> tuple[str, str] | None:
+    """Resolve current settings while retaining the legacy variable aliases."""
+    if settings.sports_odds_api_key:
+        return settings.sports_odds_api_key, settings.sports_odds_base_url
+    if settings.oddspapi_api_key:
+        return settings.oddspapi_api_key, settings.oddspapi_base_url
+    return None
 
 
 async def run() -> int:
@@ -12,8 +21,12 @@ async def run() -> int:
     if settings.mock_mode:
         print("Bookmaker coverage remains UNVERIFIED: run with MOCK_MODE=false and credentials.")
         return 2
-    assert settings.oddspapi_api_key is not None
-    client = OddsPapiClient(settings.oddspapi_api_key, settings.oddspapi_base_url)
+    connection = oddspapi_connection(settings)
+    if connection is None:
+        print("Configuration error: SPORTS_ODDS_API_KEY is required in live mode.")
+        return 2
+    api_key, base_url = connection
+    client = OddsPapiClient(api_key, base_url)
     try:
         mapped, unknown = map_provider_bookmakers(await client.list_bookmakers())
     finally:

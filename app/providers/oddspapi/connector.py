@@ -21,7 +21,7 @@ from app.providers.records import (
 
 
 class SportsOddsConnector:
-    """Read-only OddsPapi v5 connector for fixture discovery and current odds."""
+    """Read-only OddsPapi v4 connector for fixture discovery and current odds."""
 
     def __init__(
         self,
@@ -81,8 +81,10 @@ class SportsOddsConnector:
                 "/fixtures",
                 {
                     "sportId": 10,
-                    "startTimeFrom": int(start_time.timestamp()),
-                    "startTimeTo": int(end_time.timestamp()),
+                    "from": start_time.isoformat(),
+                    "to": end_time.isoformat(),
+                    "statusId": 0,
+                    "hasOdds": "true",
                     "bookmakers": ",".join(self._bookmakers),
                 },
             ),
@@ -91,17 +93,15 @@ class SportsOddsConnector:
             ProviderEvent(
                 provider=Provider.ODDSPAPI,
                 provider_event_id=str(item["fixtureId"]),
-                title=(
-                    f"{item['participants']['participant1Name']} vs "
-                    f"{item['participants']['participant2Name']}"
+                title=f"{item['participant1Name']} vs {item['participant2Name']}",
+                category=str(item["tournamentName"]),
+                scheduled_start=datetime.fromisoformat(
+                    str(item["startTime"]).replace("Z", "+00:00")
                 ),
-                category=str(item["tournament"]["tournamentName"]),
-                scheduled_start=datetime.fromtimestamp(int(item["startTime"]), UTC),
-                status=str(item["status"]["statusName"]),
+                status=str(item["statusName"]),
             )
             for item in payload
-            if not bool(item["status"]["live"])
-            and str(item["sport"]["sportName"]).casefold() == "soccer"
+            if int(item["statusId"]) == 0 and str(item["sportName"]).casefold() == "soccer"
         ]
         self._health = self._health.model_copy(update={"events_discovered": len(records)})
         return records
@@ -123,36 +123,43 @@ class SportsOddsConnector:
         payload = cast(
             dict[str, Any],
             await self._get(
-                "/fixtures/odds",
+                "/odds",
                 {
                     "fixtureId": event_id,
                     "bookmakers": ",".join(self._bookmakers),
-                    "marketActive": "true",
+                    "oddsFormat": "decimal",
                 },
             ),
         )
         records: list[ProviderSportsbookQuote] = []
-        for bookmaker, odds_by_id in cast(dict[str, Any], payload.get("odds", {})).items():
-            for raw in cast(dict[str, dict[str, Any]], odds_by_id).values():
-                changed_ms = int(raw["changedAt"])
-                records.append(
-                    ProviderSportsbookQuote(
-                        provider_event_id=event_id,
-                        bookmaker_id=bookmaker,
-                        provider_outcome_id=int(raw["outcomeId"]),
-                        bookmaker_outcome_id=(
-                            str(raw["bookmakerOutcomeId"])
-                            if raw.get("bookmakerOutcomeId") is not None
-                            else None
-                        ),
-                        market_id=int(raw["marketId"]),
-                        decimal_odds=Decimal(str(raw["price"])),
-                        active=bool(raw["active"]),
-                        market_active=bool(raw["marketActive"]),
-                        main_line=bool(raw.get("mainLine", False)),
-                        changed_at=datetime.fromtimestamp(changed_ms / 1000, UTC),
-                    )
-                )
+        bookmaker_odds = cast(dict[str, dict[str, Any]], payload.get("bookmakerOdds", {}))
+        for bookmaker, bookmaker_payload in bookmaker_odds.items():
+            markets = cast(dict[str, dict[str, Any]], bookmaker_payload.get("markets", {}))
+            for market_id, market in markets.items():
+                outcomes = cast(dict[str, dict[str, Any]], market.get("outcomes", {}))
+                for outcome_id, outcome in outcomes.items():
+                    players = cast(dict[str, dict[str, Any]], outcome.get("players", {}))
+                    for raw in players.values():
+                        records.append(
+                            ProviderSportsbookQuote(
+                                provider_event_id=event_id,
+                                bookmaker_id=bookmaker,
+                                provider_outcome_id=int(outcome_id),
+                                bookmaker_outcome_id=(
+                                    str(raw["bookmakerOutcomeId"])
+                                    if raw.get("bookmakerOutcomeId") is not None
+                                    else None
+                                ),
+                                market_id=int(market_id),
+                                decimal_odds=Decimal(str(raw["price"])),
+                                active=bool(raw["active"]),
+                                market_active=bool(market["marketActive"]),
+                                main_line=bool(raw.get("mainLine", False)),
+                                changed_at=datetime.fromisoformat(
+                                    str(raw["changedAt"]).replace("Z", "+00:00")
+                                ),
+                            )
+                        )
         return records
 
     async def health(self) -> ProviderHealthRecord:
