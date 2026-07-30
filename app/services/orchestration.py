@@ -4,6 +4,7 @@ import asyncio
 import logging
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
+from time import perf_counter
 from typing import Protocol
 
 from redis.asyncio import Redis
@@ -25,7 +26,7 @@ from app.services.alerting import AlertCoordinator
 from app.services.live_pipeline import collect_live_snapshot
 from app.services.scanner import ScannerState
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 class SportsConnector(Protocol):
@@ -48,6 +49,7 @@ class ScanOrchestrator:
         self._stopping = asyncio.Event()
         self._health: dict[Provider, ProviderHealthRecord] = {}
         self.last_scan_error: str | None = None
+        self.scan_in_progress = False
         self._engine: AsyncEngine | None = None
         self._redis: Redis | None = None
         self.repository: LiveScanRepository | None = None
@@ -112,7 +114,11 @@ class ScanOrchestrator:
 
     async def _run(self) -> None:
         while not self._stopping.is_set():
-            await self.scan_once()
+            self.scan_in_progress = True
+            try:
+                await self.scan_once()
+            finally:
+                self.scan_in_progress = False
             try:
                 await asyncio.wait_for(
                     self._stopping.wait(), timeout=self.settings.price_poll_interval_seconds
@@ -157,7 +163,13 @@ class ScanOrchestrator:
                     approved_event_mappings,
                 )
                 if self.repository is not None:
+                    logger.info("scan.persistence.start")
+                    persistence_started = perf_counter()
                     await self.repository.persist(snapshot)
+                    logger.info(
+                        "scan.persistence.complete duration_seconds=%.3f",
+                        perf_counter() - persistence_started,
+                    )
                 self.scanner.apply_live_snapshot(snapshot, now)
                 await self.alerts.process()
                 self.last_scan_error = None

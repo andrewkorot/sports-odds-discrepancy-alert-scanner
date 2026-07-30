@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from time import perf_counter
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+import httpx
 from rapidfuzz import fuzz
 
 from app.core.config import Settings
@@ -33,7 +36,12 @@ from app.domain.models import (
 from app.providers.base import PredictionMarketConnector
 from app.providers.oddspapi.connector import SportsOddsConnector
 from app.providers.oddspapi.mapping import CANONICAL_BOOKMAKERS
-from app.providers.records import ProviderEvent, ProviderMarket
+from app.providers.records import (
+    ProviderEvent,
+    ProviderMarket,
+    ProviderSportsbookQuote,
+    ProviderTrade,
+)
 from app.services.edge_calculator import decimal_odds_to_implied_probability
 from app.services.normalization import (
     competition_identity,
@@ -45,6 +53,17 @@ from app.services.normalization import (
 )
 from app.services.opportunity_detector import evaluate_candidates, opportunities_from_candidates
 from app.services.provider_normalization import normalize_order_book
+
+logger = logging.getLogger("uvicorn.error")
+
+
+def _http_error_context(exc: Exception) -> tuple[int | None, str | None]:
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return None, None
+    return (
+        exc.response.status_code,
+        exc.response.headers.get("retry-after"),
+    )
 
 
 @dataclass(frozen=True)
@@ -185,7 +204,19 @@ def _split_matchup(title: str) -> tuple[str, str] | None:
     parts = re.split(r"\s+(?:vs?\.?|at|@)\s+", title, maxsplit=1, flags=re.IGNORECASE)
     if len(parts) != 2:
         return None
-    home, away = (part.strip(" -:") for part in parts)
+    home = parts[0].strip(" -:")
+    away_text = parts[1].strip(" -:")
+    away, separator, descriptor = away_text.partition(":")
+    if not (
+        separator
+        and re.search(
+            r"\b(regulation\s+time|90\s*minutes?|moneyline|match\s+winner)\b",
+            descriptor,
+            flags=re.IGNORECASE,
+        )
+    ):
+        away = away_text
+    away = away.strip(" -:")
     return (home, away) if home and away else None
 
 
@@ -692,6 +723,14 @@ async def collect_live_snapshot(
     end: datetime,
     approved_event_mappings: dict[tuple[str, str], str] | None = None,
 ) -> LiveScanSnapshot:
+    scan_started = perf_counter()
+    discovery_started = perf_counter()
+    logger.info(
+        "scan.discovery.start window_start=%s window_end=%s prediction_providers=%d",
+        start.isoformat(),
+        end.isoformat(),
+        len(prediction_connectors),
+    )
     prediction_tasks = [
         asyncio.create_task(connector.discover_events(start, end))
         for connector in prediction_connectors
@@ -707,6 +746,12 @@ async def collect_live_snapshot(
         (connector, result if isinstance(result, list) else [])
         for connector, result in zip(prediction_connectors, discovery_results, strict=True)
     ]
+    logger.info(
+        "scan.discovery.complete sportsbook_events=%d prediction_events=%d duration_seconds=%.3f",
+        len(sportsbook_events),
+        sum(len(events) for _connector, events in prediction_event_batches),
+        perf_counter() - discovery_started,
+    )
 
     bookmakers = _bookmakers(mapped_bookmakers, settings.enabled_bookmakers, now)
     canonical_events: dict[UUID, CanonicalEvent] = {}
@@ -721,10 +766,22 @@ async def collect_live_snapshot(
         sportsbook_events,
         settings.event_match_kickoff_tolerance_minutes,
     )
+    matching_started = perf_counter()
     for _connector, prediction_events in prediction_event_batches:
         for raw_event in prediction_events:
+            logger.info(
+                "match.event.start provider=%s event_id=%s title=%r",
+                raw_event.provider.value,
+                raw_event.provider_event_id,
+                raw_event.title,
+            )
             prediction_event = enrich_prediction_event(raw_event)
             if prediction_event is None:
+                logger.info(
+                    "match.event.rejected provider=%s event_id=%s reason=matchup_unparseable",
+                    raw_event.provider.value,
+                    raw_event.provider_event_id,
+                )
                 event_matches.append(
                     EventMatchAudit(
                         provider=raw_event.provider,
@@ -759,6 +816,13 @@ async def collect_live_snapshot(
                 prediction_event,
                 settings.event_match_kickoff_tolerance_minutes,
             )
+            logger.info(
+                "match.event.candidates provider=%s event_id=%s source=%s count=%d",
+                prediction_event.provider.value,
+                prediction_event.provider_event_id,
+                "stored_mapping" if mapped_events else "event_index",
+                len(match_candidates),
+            )
             matched, audit = audit_prediction_event(
                 prediction_event,
                 match_candidates,
@@ -784,6 +848,17 @@ async def collect_live_snapshot(
                     }
                 )
             event_matches.append(audit)
+            logger.info(
+                "match.event.result provider=%s event_id=%s matched=%s confidence=%s "
+                "sportsbook_event_id=%s score=%s reasons=%s",
+                prediction_event.provider.value,
+                prediction_event.provider_event_id,
+                audit.matched,
+                audit.match_confidence.value,
+                audit.sportsbook_event_id,
+                audit.weighted_score,
+                ",".join(audit.rejection_reasons) or "none",
+            )
             if matched is not None:
                 matched_sportsbook_event_ids.add(matched.provider_event_id)
                 if (
@@ -839,11 +914,25 @@ async def collect_live_snapshot(
             )
         )
 
-    for event in sportsbook_events:
-        if event.provider_event_id not in matched_sportsbook_event_ids:
-            continue
-        if not all([event.home_team, event.away_team, event.scheduled_start]):
-            continue
+    logger.info(
+        "match.batch.complete matched_prediction_events=%d unmatched_audits=%d "
+        "duration_seconds=%.3f",
+        len(matched_by_prediction),
+        sum(not audit.matched for audit in event_matches),
+        perf_counter() - matching_started,
+    )
+
+    pricing_started = perf_counter()
+    request_semaphore = asyncio.Semaphore(settings.provider_request_concurrency)
+    matched_sportsbook_events = [
+        event
+        for event in sportsbook_events
+        if event.provider_event_id in matched_sportsbook_event_ids
+        and event.home_team
+        and event.away_team
+        and event.scheduled_start
+    ]
+    for event in matched_sportsbook_events:
         event_id = canonical_event_id(event)
         canonical_events[event_id] = CanonicalEvent(
             id=event_id,
@@ -853,10 +942,40 @@ async def collect_live_snapshot(
             away_team=event.away_team or "",
             kickoff_time_utc=event.scheduled_start,
         )
+
+    async def fetch_event_odds(
+        event: ProviderEvent,
+    ) -> tuple[ProviderEvent, list[ProviderSportsbookQuote]]:
         try:
-            event_odds = await sports_connector.get_event_odds(event.provider_event_id)
-        except Exception:
-            continue
+            logger.info(
+                "pricing.sportsbook.start event_id=%s title=%r",
+                event.provider_event_id,
+                event.title,
+            )
+            async with request_semaphore:
+                event_odds = await sports_connector.get_event_odds(event.provider_event_id)
+            logger.info(
+                "pricing.sportsbook.complete event_id=%s quotes=%d",
+                event.provider_event_id,
+                len(event_odds),
+            )
+        except Exception as exc:
+            status_code, retry_after = _http_error_context(exc)
+            logger.warning(
+                "pricing.sportsbook.failed event_id=%s error_type=%s status_code=%s retry_after=%s",
+                event.provider_event_id,
+                type(exc).__name__,
+                status_code,
+                retry_after,
+            )
+            return event, []
+        return event, event_odds
+
+    odds_results = await asyncio.gather(
+        *(fetch_event_odds(event) for event in matched_sportsbook_events)
+    )
+    for event, event_odds in odds_results:
+        event_id = canonical_event_id(event)
         for quote in event_odds:
             if quote.bookmaker_id not in settings.enabled_bookmakers:
                 continue
@@ -891,6 +1010,7 @@ async def collect_live_snapshot(
 
     predictions: list[PredictionMarketQuote] = []
     order_books: dict[str, OrderBookSnapshot] = {}
+    prediction_jobs: list[tuple[PredictionMarketConnector, ProviderEvent, ProviderEvent]] = []
     for connector, prediction_events in prediction_event_batches:
         for raw_event in prediction_events:
             prediction_event = enrich_prediction_event(raw_event)
@@ -904,76 +1024,191 @@ async def collect_live_snapshot(
             if matched is None or matched.scheduled_start is None:
                 continue
             prediction_event = oriented_prediction_by_id[prediction_key]
-            event_id = canonical_event_id(matched)
-            try:
+            prediction_jobs.append((connector, prediction_event, matched))
+
+    async def discover_prediction_markets(
+        connector: PredictionMarketConnector,
+        prediction_event: ProviderEvent,
+        matched: ProviderEvent,
+    ) -> tuple[
+        PredictionMarketConnector,
+        ProviderEvent,
+        ProviderEvent,
+        list[ProviderMarket],
+    ]:
+        logger.info(
+            "pricing.prediction.markets.start provider=%s event_id=%s title=%r",
+            prediction_event.provider.value,
+            prediction_event.provider_event_id,
+            prediction_event.title,
+        )
+        try:
+            async with request_semaphore:
                 markets = await connector.discover_markets(prediction_event.provider_event_id)
+        except Exception as exc:
+            status_code, retry_after = _http_error_context(exc)
+            logger.warning(
+                "pricing.prediction.markets.failed provider=%s event_id=%s "
+                "error_type=%s status_code=%s retry_after=%s",
+                prediction_event.provider.value,
+                prediction_event.provider_event_id,
+                type(exc).__name__,
+                status_code,
+                retry_after,
+            )
+            markets = []
+        logger.info(
+            "pricing.prediction.markets.complete provider=%s event_id=%s markets=%d",
+            prediction_event.provider.value,
+            prediction_event.provider_event_id,
+            len(markets),
+        )
+        return connector, prediction_event, matched, markets
+
+    market_results = await asyncio.gather(
+        *(discover_prediction_markets(*job) for job in prediction_jobs)
+    )
+    trade_tasks: dict[
+        tuple[Provider, str],
+        asyncio.Task[list[ProviderTrade]],
+    ] = {}
+
+    async def fetch_trades(
+        connector: PredictionMarketConnector,
+        market_id: str,
+    ) -> list[ProviderTrade]:
+        async with request_semaphore:
+            return await connector.get_recent_trades(
+                market_id,
+                now - timedelta(hours=24),
+            )
+
+    async def price_selection(
+        connector: PredictionMarketConnector,
+        prediction_event: ProviderEvent,
+        matched: ProviderEvent,
+        market: ProviderMarket,
+        selection: Selection,
+        lookup_id: str,
+    ) -> tuple[PredictionMarketQuote | None, OrderBookSnapshot | None]:
+        trade_task: asyncio.Task[list[ProviderTrade]] | None = None
+        if market.provider == Provider.KALSHI:
+            trade_key = (market.provider, market.provider_market_id)
+            trade_task = trade_tasks.get(trade_key)
+            if trade_task is None:
+                trade_task = asyncio.create_task(fetch_trades(connector, market.provider_market_id))
+                trade_tasks[trade_key] = trade_task
+        try:
+            logger.info(
+                "pricing.orderbook.start provider=%s market_id=%s selection=%s",
+                market.provider.value,
+                market.provider_market_id,
+                selection.value,
+            )
+            async with request_semaphore:
+                book = await connector.get_order_book(lookup_id)
+        except Exception as exc:
+            status_code, retry_after = _http_error_context(exc)
+            logger.warning(
+                "pricing.orderbook.failed provider=%s market_id=%s error_type=%s "
+                "status_code=%s retry_after=%s",
+                market.provider.value,
+                market.provider_market_id,
+                type(exc).__name__,
+                status_code,
+                retry_after,
+            )
+            return None, None
+        synthetic_market_id = (
+            market.provider_market_id
+            if market.provider == Provider.KALSHI
+            else f"{market.provider_market_id}:{lookup_id}"
+        )
+        volume = market.trailing_24h_volume_usd
+        volume_source = VolumeSource.PROVIDER_REPORTED if volume is not None else None
+        if trade_task is not None:
+            try:
+                trades = await trade_task
             except Exception:
-                continue
-            for market in markets:
-                for selection, lookup_id in prediction_selections(market, prediction_event):
-                    try:
-                        book = await connector.get_order_book(lookup_id)
-                    except Exception:
-                        continue
-                    synthetic_market_id = (
-                        market.provider_market_id
-                        if market.provider == Provider.KALSHI
-                        else f"{market.provider_market_id}:{lookup_id}"
-                    )
-                    volume = market.trailing_24h_volume_usd
-                    volume_source = VolumeSource.PROVIDER_REPORTED if volume is not None else None
-                    if market.provider == Provider.KALSHI:
-                        try:
-                            trades = await connector.get_recent_trades(
-                                market.provider_market_id, now - timedelta(hours=24)
-                            )
-                        except Exception:
-                            continue
-                        volume = sum((trade.price * trade.quantity for trade in trades), Decimal())
-                        volume_source = VolumeSource.CALCULATED_FROM_TRADES
-                    snapshot = normalize_order_book(
-                        book, selection, now, volume, volume_source
-                    ).model_copy(update={"provider_market_id": synthetic_market_id})
-                    if snapshot.best_bid is None or snapshot.best_ask is None:
-                        continue
-                    order_books[synthetic_market_id] = snapshot
-                    predictions.append(
-                        PredictionMarketQuote(
-                            provider=market.provider,
-                            provider_event_id=prediction_event.provider_event_id,
-                            provider_market_id=synthetic_market_id,
-                            canonical_event_id=event_id,
-                            sport=matched.sport or "soccer",
-                            competition=matched.competition or matched.category or "",
-                            home_team=matched.home_team or "",
-                            away_team=matched.away_team or "",
-                            kickoff_time_utc=matched.scheduled_start,
-                            selection=selection,
-                            best_bid_probability=snapshot.best_bid,
-                            best_ask_probability=snapshot.best_ask,
-                            best_bid_size=max(
-                                (
-                                    level.quantity
-                                    for level in snapshot.bids
-                                    if level.price == snapshot.best_bid
-                                ),
-                                default=Decimal(),
-                            ),
-                            best_ask_size=min(
-                                (
-                                    level.quantity
-                                    for level in snapshot.asks
-                                    if level.price == snapshot.best_ask
-                                ),
-                                default=Decimal(),
-                            ),
-                            source_timestamp=snapshot.source_timestamp,
-                            received_timestamp=now,
-                            direct_url=None,
-                        )
-                    )
+                return None, None
+            volume = sum((trade.price * trade.quantity for trade in trades), Decimal())
+            volume_source = VolumeSource.CALCULATED_FROM_TRADES
+        snapshot = normalize_order_book(
+            book,
+            selection,
+            now,
+            volume,
+            volume_source,
+        ).model_copy(update={"provider_market_id": synthetic_market_id})
+        if snapshot.best_bid is None or snapshot.best_ask is None:
+            return None, None
+        quote = PredictionMarketQuote(
+            provider=market.provider,
+            provider_event_id=prediction_event.provider_event_id,
+            provider_market_id=synthetic_market_id,
+            canonical_event_id=canonical_event_id(matched),
+            sport=matched.sport or "soccer",
+            competition=matched.competition or matched.category or "",
+            home_team=matched.home_team or "",
+            away_team=matched.away_team or "",
+            kickoff_time_utc=matched.scheduled_start,
+            selection=selection,
+            best_bid_probability=snapshot.best_bid,
+            best_ask_probability=snapshot.best_ask,
+            best_bid_size=max(
+                (level.quantity for level in snapshot.bids if level.price == snapshot.best_bid),
+                default=Decimal(),
+            ),
+            best_ask_size=min(
+                (level.quantity for level in snapshot.asks if level.price == snapshot.best_ask),
+                default=Decimal(),
+            ),
+            source_timestamp=snapshot.source_timestamp,
+            received_timestamp=now,
+            direct_url=None,
+        )
+        return quote, snapshot
+
+    selection_jobs = [
+        (
+            connector,
+            prediction_event,
+            matched,
+            market,
+            selection,
+            lookup_id,
+        )
+        for connector, prediction_event, matched, markets in market_results
+        for market in markets
+        for selection, lookup_id in prediction_selections(market, prediction_event)
+    ]
+    selection_results = await asyncio.gather(*(price_selection(*job) for job in selection_jobs))
+    if trade_tasks:
+        await asyncio.gather(*trade_tasks.values(), return_exceptions=True)
+    logger.info(
+        "scan.pricing.complete sportsbook_quotes=%d prediction_quotes=%d duration_seconds=%.3f",
+        len(sportsbooks),
+        sum(quote is not None for quote, _snapshot in selection_results),
+        perf_counter() - pricing_started,
+    )
+    qualification_started = perf_counter()
+    for prediction_quote, snapshot in selection_results:
+        if prediction_quote is None or snapshot is None:
+            continue
+        predictions.append(prediction_quote)
+        order_books[prediction_quote.provider_market_id] = snapshot
     candidates = evaluate_candidates(
         predictions, sportsbooks, bookmakers, settings, now, order_books
+    )
+    logger.info(
+        "scan.qualification.complete predictions=%d sportsbook_quotes=%d "
+        "candidates=%d opportunities=%d duration_seconds=%.3f total_seconds=%.3f",
+        len(predictions),
+        len(sportsbooks),
+        len(candidates),
+        sum(candidate.accepted for candidate in candidates),
+        perf_counter() - qualification_started,
+        perf_counter() - scan_started,
     )
     return LiveScanSnapshot(
         events=list(canonical_events.values()),

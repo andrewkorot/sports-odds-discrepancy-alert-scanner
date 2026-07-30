@@ -131,9 +131,10 @@ async def test_kalshi_discovers_only_soccer_game_series_and_extracts_participant
     assert len(events) == 1
     assert events[0].participant_one == "Atlanta United"
     assert events[0].participant_two == "Inter Miami CF"
-    assert not events[0].orientation_known
+    assert events[0].orientation_known
     assert events[0].extraction_source == "event_title"
-    assert events[0].home_team is None and events[0].away_team is None
+    assert events[0].home_team == "Atlanta United"
+    assert events[0].away_team == "Inter Miami CF"
     assert events[0].competition == "MLS"
     assert events[0].scheduled_start == datetime(2026, 7, 30, 20, tzinfo=UTC)
     await client.aclose()
@@ -164,6 +165,18 @@ def test_kalshi_participants_fall_back_to_two_market_outcomes() -> None:
         "Atlanta United",
         "market_yes_sub_titles",
     )
+
+
+def test_kalshi_title_removes_regulation_moneyline_descriptor() -> None:
+    event = KalshiEventPayload(
+        event_ticker="event",
+        series_ticker="series",
+        title="Panathinaikos vs Paksi: Regulation Time Moneyline",
+    )
+
+    extracted = KalshiConnector.extract_participants(event, [])
+
+    assert extracted == ("Panathinaikos", "Paksi", "event_title")
 
 
 def test_polymarket_market_preserves_outcome_token_relationship() -> None:

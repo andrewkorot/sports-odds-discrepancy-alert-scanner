@@ -45,6 +45,8 @@ async def test_dashboard_and_static_assets(client: AsyncClient) -> None:
 
     assert dashboard.status_code == 200
     assert "PitchEdge" in dashboard.text
+    assert 'id="matchedList"' in dashboard.text
+    assert 'id="matchedProviderFilter"' in dashboard.text
     assert stylesheet.status_code == 200
     assert "mobile-nav" in stylesheet.text
     assert script.status_code == 200

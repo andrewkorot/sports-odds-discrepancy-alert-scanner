@@ -205,7 +205,7 @@ class PolymarketConnector:
             seen_cursors.add(next_cursor)
             cursor = next_cursor
         self._health = self._health.model_copy(update={"events_discovered": len(records)})
-        print(f"Total events discovered: {len(records)}")
+        print(f"Total events from polymarket discovered: {len(records)}")
         # print(records)
         return records
 

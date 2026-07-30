@@ -39,8 +39,8 @@ class Settings(BaseSettings):
     live_dry_run: bool = True
     alerts_enabled: bool = False
     telegram_enabled: bool = False
-    discovery_interval_seconds: int = 300
     price_poll_interval_seconds: int = 30
+    provider_request_concurrency: int = Field(default=8, ge=1, le=32)
     event_match_kickoff_tolerance_minutes: int = 15
     event_match_fuzzy_min_score: Decimal = Decimal("80")
     event_match_ambiguity_margin: Decimal = Decimal("5")
@@ -76,7 +76,6 @@ class Settings(BaseSettings):
     max_hours_before_kickoff: int = 72
     alert_cooldown_minutes: int = 10
     realert_edge_increase_pp: Decimal = Decimal("1.0")
-    oddspapi_poll_interval_seconds: int = 30
 
     @field_validator("enabled_bookmakers", "enabled_market_types", "enabled_sports", mode="before")
     @classmethod

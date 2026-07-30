@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -186,6 +187,66 @@ class UnorderedPredictionConnector(FakePredictionConnector):
         ]
 
 
+class MultiEventPredictionConnector(FakePredictionConnector):
+    async def discover_events(
+        self, start_time: datetime, end_time: datetime
+    ) -> list[ProviderEvent]:
+        kickoff = datetime(2026, 7, 30, 20, tzinfo=UTC)
+        return [
+            ProviderEvent(
+                provider=Provider.KALSHI,
+                provider_event_id=f"kalshi-{index}",
+                title=f"Home {index} vs Away {index}",
+                category="MLS",
+                home_team=f"Home {index}",
+                away_team=f"Away {index}",
+                orientation_known=True,
+                scheduled_start=kickoff,
+                status="open",
+            )
+            for index in range(2)
+        ]
+
+    async def discover_markets(self, event_id: str) -> list[ProviderMarket]:
+        return []
+
+
+class ConcurrentSportsConnector(FakeSportsConnector):
+    def __init__(self) -> None:
+        self.active = 0
+        self.maximum_active = 0
+        self.both_started = asyncio.Event()
+
+    async def discover_events(
+        self, start_time: datetime, end_time: datetime
+    ) -> list[ProviderEvent]:
+        kickoff = datetime(2026, 7, 30, 20, tzinfo=UTC)
+        return [
+            ProviderEvent(
+                provider=Provider.ODDSPAPI,
+                provider_event_id=f"odds-{index}",
+                title=f"Home {index} vs Away {index}",
+                category="MLS",
+                sport="soccer",
+                competition="MLS",
+                home_team=f"Home {index}",
+                away_team=f"Away {index}",
+                scheduled_start=kickoff,
+                status="Pre-Game",
+            )
+            for index in range(2)
+        ]
+
+    async def get_event_odds(self, event_id: str) -> list[ProviderSportsbookQuote]:
+        self.active += 1
+        self.maximum_active = max(self.maximum_active, self.active)
+        if self.active >= 2:
+            self.both_started.set()
+        await asyncio.wait_for(self.both_started.wait(), timeout=1)
+        self.active -= 1
+        return []
+
+
 async def test_live_pipeline_retrieves_normalizes_matches_and_calculates() -> None:
     now = datetime(2026, 7, 30, 16, tzinfo=UTC)
     settings = Settings(
@@ -212,6 +273,25 @@ async def test_live_pipeline_retrieves_normalizes_matches_and_calculates() -> No
     assert opportunity.bookmaker_id == "pinnacle"
     assert opportunity.prediction_market_best_ask == Decimal("0.52")
     assert opportunity.edge_percentage_points > Decimal("5")
+
+
+async def test_sportsbook_pricing_requests_use_bounded_concurrency() -> None:
+    now = datetime(2026, 7, 30, 16, tzinfo=UTC)
+    sports = ConcurrentSportsConnector()
+
+    await collect_live_snapshot(
+        [MultiEventPredictionConnector()],
+        sports,  # type: ignore[arg-type]
+        Settings(
+            enabled_bookmakers=["pinnacle"],
+            provider_request_concurrency=2,
+        ),
+        now,
+        now,
+        now + timedelta(hours=8),
+    )
+
+    assert sports.maximum_active == 2
 
 
 async def test_prediction_provider_failure_does_not_block_other_discovery() -> None:

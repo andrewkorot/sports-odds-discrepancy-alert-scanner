@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
@@ -25,7 +26,7 @@ from app.db.models import (
     SportsbookQuoteRow,
     TeamRow,
 )
-from app.domain.models import Opportunity, PredictionMarketQuote, SportsbookQuote
+from app.domain.models import CanonicalEvent, Opportunity, PredictionMarketQuote, SportsbookQuote
 from app.providers.records import ProviderHealthRecord
 from app.services.alert_deduplication import deduplication_key
 from app.services.live_pipeline import LiveScanSnapshot
@@ -82,24 +83,19 @@ class LiveScanRepository:
                     for key, value in values.items():
                         setattr(bookmaker_row, key, value)
 
+            event_ids: dict[UUID, UUID] = {}
             for event in snapshot.events:
                 competition = await self._competition(session, event.competition, event.sport)
                 home = await self._team(session, event.home_team, event.sport)
                 away = await self._team(session, event.away_team, event.sport)
-                event_row = await session.get(EventRow, event.id)
-                if event_row is None:
-                    event_row = EventRow(
-                        id=event.id,
-                        competition_id=competition.id,
-                        home_team_id=home.id,
-                        away_team_id=away.id,
-                        kickoff_time_utc=event.kickoff_time_utc,
-                        status=event.status,
-                    )
-                    session.add(event_row)
-                else:
-                    event_row.kickoff_time_utc = event.kickoff_time_utc
-                    event_row.status = event.status
+                event_row = await self._event(
+                    session,
+                    event,
+                    competition,
+                    home,
+                    away,
+                )
+                event_ids[event.id] = event_row.id
             await session.flush()
 
             provider_events: dict[tuple[str, str], ProviderEventRow] = {}
@@ -107,41 +103,91 @@ class LiveScanRepository:
                 *snapshot.predictions,
                 *snapshot.sportsbooks,
             ]
-            for quote in all_quotes:
-                provider_key = (quote.provider.value, quote.provider_event_id)
-                if provider_key in provider_events:
-                    continue
-                provider_event_row = await session.scalar(
+            provider_keys = {
+                (quote.provider.value, quote.provider_event_id) for quote in all_quotes
+            }
+            if provider_keys:
+                existing_provider_events = await session.scalars(
                     select(ProviderEventRow).where(
-                        ProviderEventRow.provider == provider_key[0],
-                        ProviderEventRow.provider_event_id == provider_key[1],
+                        tuple_(
+                            ProviderEventRow.provider,
+                            ProviderEventRow.provider_event_id,
+                        ).in_(provider_keys)
                     )
                 )
+                provider_events = {
+                    (row.provider, row.provider_event_id): row for row in existing_provider_events
+                }
+            quote_by_provider_key = {
+                (quote.provider.value, quote.provider_event_id): quote for quote in all_quotes
+            }
+            for provider_key in provider_keys:
+                quote = quote_by_provider_key[provider_key]
+                provider_event_row = provider_events.get(provider_key)
                 if provider_event_row is None:
                     provider_event_row = ProviderEventRow(
+                        id=uuid4(),
                         provider=provider_key[0],
                         provider_event_id=provider_key[1],
-                        event_id=quote.canonical_event_id,
+                        event_id=event_ids[quote.canonical_event_id],
                         raw_status=quote.market_status.value,
                     )
                     session.add(provider_event_row)
-                    await session.flush()
+                elif provider_event_row.event_id != event_ids[quote.canonical_event_id]:
+                    provider_event_row.event_id = event_ids[quote.canonical_event_id]
                 provider_events[provider_key] = provider_event_row
 
+            persisted_market_rows = await session.scalars(
+                select(MarketRow).where(MarketRow.event_id.in_(set(event_ids.values())))
+            )
+            resolved_markets = {
+                self._resolved_market_key(
+                    row.event_id,
+                    row.market_type,
+                    row.selection,
+                    row.period,
+                    row.participant,
+                    row.line,
+                ): row
+                for row in persisted_market_rows
+            }
             market_rows: dict[tuple[UUID, str, str, str | None, str | None], MarketRow] = {}
             prediction_quote_rows: dict[tuple[str, str], PredictionMarketQuoteRow] = {}
             snapshot_rows: dict[str, OrderBookSnapshotRow] = {}
-            for quote in snapshot.predictions:
-                market = await self._market(session, quote)
-                market_rows[self._market_key(quote)] = market
-                provider_market = await session.scalar(
+            pending_prediction_parents: list[PredictionMarketQuoteRow | OrderBookSnapshotRow] = []
+            pending_order_book_levels: list[OrderBookLevelRow] = []
+            provider_market_keys = {
+                (quote.provider.value, quote.provider_market_id) for quote in snapshot.predictions
+            }
+            provider_markets: dict[tuple[str, str], ProviderMarketRow] = {}
+            if provider_market_keys:
+                existing_provider_markets = await session.scalars(
                     select(ProviderMarketRow).where(
-                        ProviderMarketRow.provider == quote.provider.value,
-                        ProviderMarketRow.provider_market_id == quote.provider_market_id,
+                        tuple_(
+                            ProviderMarketRow.provider,
+                            ProviderMarketRow.provider_market_id,
+                        ).in_(provider_market_keys)
                     )
                 )
+                provider_markets = {
+                    (row.provider, row.provider_market_id): row for row in existing_provider_markets
+                }
+            for quote in snapshot.predictions:
+                market = self._cached_market(
+                    session,
+                    quote,
+                    event_ids[quote.canonical_event_id],
+                    resolved_markets,
+                )
+                market_rows[self._market_key(quote)] = market
+                provider_market_key = (
+                    quote.provider.value,
+                    quote.provider_market_id,
+                )
+                provider_market = provider_markets.get(provider_market_key)
                 if provider_market is None:
                     provider_market = ProviderMarketRow(
+                        id=uuid4(),
                         provider=quote.provider.value,
                         provider_market_id=quote.provider_market_id,
                         market_id=market.id,
@@ -149,8 +195,13 @@ class LiveScanRepository:
                         direct_url=quote.direct_url,
                     )
                     session.add(provider_market)
-                    await session.flush()
+                    provider_markets[provider_market_key] = provider_market
+                else:
+                    provider_market.market_id = market.id
+                    provider_market.status = quote.market_status.value
+                    provider_market.direct_url = quote.direct_url
                 quote_row = PredictionMarketQuoteRow(
+                    id=uuid4(),
                     provider_market_id=provider_market.id,
                     best_bid_probability=quote.best_bid_probability,
                     best_ask_probability=quote.best_ask_probability,
@@ -159,11 +210,11 @@ class LiveScanRepository:
                     source_timestamp=quote.source_timestamp,
                     received_timestamp=quote.received_timestamp,
                 )
-                session.add(quote_row)
-                await session.flush()
+                pending_prediction_parents.append(quote_row)
                 prediction_quote_rows[(quote.provider.value, quote.provider_market_id)] = quote_row
                 book = snapshot.order_books[quote.provider_market_id]
                 book_row = OrderBookSnapshotRow(
+                    id=uuid4(),
                     provider_market_id=provider_market.id,
                     outcome=book.outcome.value,
                     best_bid=book.best_bid,
@@ -175,29 +226,51 @@ class LiveScanRepository:
                     source_timestamp=book.source_timestamp,
                     received_timestamp=book.received_timestamp,
                 )
-                session.add(book_row)
-                await session.flush()
+                pending_prediction_parents.append(book_row)
                 snapshot_rows[quote.provider_market_id] = book_row
-                session.add_all(
-                    [
-                        OrderBookLevelRow(
-                            snapshot_id=book_row.id,
-                            side=side,
-                            price=level.price,
-                            quantity=level.quantity,
-                            notional_usd=level.notional_usd,
-                        )
-                        for side, levels in (("bid", book.bids), ("ask", book.asks))
-                        for level in levels
-                    ]
+                pending_order_book_levels.extend(
+                    OrderBookLevelRow(
+                        snapshot_id=book_row.id,
+                        side=side,
+                        price=level.price,
+                        quantity=level.quantity,
+                        notional_usd=level.notional_usd,
+                    )
+                    for side, levels in (("bid", book.bids), ("ask", book.asks))
+                    for level in levels
                 )
 
+            # Phase 1: canonical and provider markets must exist before prediction
+            # quotes and order-book snapshots that reference them by UUID.
+            await session.flush()
+            session.add_all(pending_prediction_parents)
+
+            # Phase 2: prediction quotes and order-book snapshot parents must exist
+            # before direct-UUID level rows.
+            await session.flush()
+            session.add_all(pending_order_book_levels)
+
             sportsbook_quote_rows: dict[tuple[str, str, str, str], SportsbookQuoteRow] = {}
+            pending_sportsbook_quotes: list[
+                tuple[SportsbookQuote, MarketRow, ProviderEventRow]
+            ] = []
             for quote in snapshot.sportsbooks:
-                market = await self._market(session, quote)
+                market = self._cached_market(
+                    session,
+                    quote,
+                    event_ids[quote.canonical_event_id],
+                    resolved_markets,
+                )
                 market_rows[self._market_key(quote)] = market
                 provider_event = provider_events[(quote.provider.value, quote.provider_event_id)]
+                pending_sportsbook_quotes.append((quote, market, provider_event))
+
+            # Phase 3: any sportsbook-only canonical markets must exist before their
+            # direct-UUID sportsbook quote rows.
+            await session.flush()
+            for quote, market, provider_event in pending_sportsbook_quotes:
                 sportsbook_quote_row = SportsbookQuoteRow(
+                    id=uuid4(),
                     provider_event_id=provider_event.id,
                     market_id=market.id,
                     bookmaker_id=quote.bookmaker_id,
@@ -207,7 +280,6 @@ class LiveScanRepository:
                     received_timestamp=quote.received_timestamp,
                 )
                 session.add(sportsbook_quote_row)
-                await session.flush()
                 sportsbook_quote_rows[
                     (
                         str(quote.canonical_event_id),
@@ -216,6 +288,10 @@ class LiveScanRepository:
                         quote.selection.value,
                     )
                 ] = sportsbook_quote_row
+
+            # Phase 4: levels and sportsbook quotes must exist before candidate and
+            # opportunity rows reference their UUIDs.
+            await session.flush()
 
             for candidate in snapshot.candidates:
                 prediction = candidate.prediction_quote
@@ -349,27 +425,33 @@ class LiveScanRepository:
             str(line) if line is not None else None,
         )
 
-    async def _market(
-        self, session: AsyncSession, quote: PredictionMarketQuote | SportsbookQuote
+    def _cached_market(
+        self,
+        session: AsyncSession,
+        quote: PredictionMarketQuote | SportsbookQuote,
+        event_id: UUID,
+        cache: dict[
+            tuple[UUID, str, str, str, str | None, Decimal | None],
+            MarketRow,
+        ],
     ) -> MarketRow:
-        key = self._market_key(quote)
-        canonical_event_id, market_type, selection, participant, _line_text = key
+        market_type = quote.market_type.value
+        selection = quote.selection.value
+        participant = quote.participant
         line = getattr(quote, "line", None)
-        row = await session.scalar(
-            select(MarketRow).where(
-                MarketRow.event_id == canonical_event_id,
-                MarketRow.market_type == market_type,
-                MarketRow.selection == selection,
-                MarketRow.period == quote.period.value,
-                MarketRow.participant.is_(None)
-                if participant is None
-                else MarketRow.participant == participant,
-                MarketRow.line.is_(None) if line is None else MarketRow.line == line,
-            )
+        cache_key = self._resolved_market_key(
+            event_id,
+            market_type,
+            selection,
+            quote.period.value,
+            participant,
+            line,
         )
+        row = cache.get(cache_key)
         if row is None:
             row = MarketRow(
-                event_id=canonical_event_id,
+                id=uuid4(),
+                event_id=event_id,
                 market_type=market_type,
                 selection=selection,
                 period=quote.period.value,
@@ -384,8 +466,26 @@ class LiveScanRepository:
                 settlement_rule=quote.settlement_rule,
             )
             session.add(row)
-            await session.flush()
+            cache[cache_key] = row
         return row
+
+    @staticmethod
+    def _resolved_market_key(
+        event_id: UUID,
+        market_type: str,
+        selection: str,
+        period: str,
+        participant: str | None,
+        line: Decimal | None,
+    ) -> tuple[UUID, str, str, str, str | None, Decimal | None]:
+        return (
+            event_id,
+            market_type,
+            selection,
+            period,
+            participant,
+            line,
+        )
 
     async def _competition(self, session: AsyncSession, name: str, sport: str) -> CompetitionRow:
         row = await session.scalar(
@@ -395,6 +495,39 @@ class LiveScanRepository:
             row = CompetitionRow(id=uuid4(), name=name, sport=sport)
             session.add(row)
             await session.flush()
+        return row
+
+    async def _event(
+        self,
+        session: AsyncSession,
+        event: CanonicalEvent,
+        competition: CompetitionRow,
+        home: TeamRow,
+        away: TeamRow,
+    ) -> EventRow:
+        row = await session.get(EventRow, event.id)
+        if row is None:
+            row = await session.scalar(
+                select(EventRow).where(
+                    EventRow.competition_id == competition.id,
+                    EventRow.home_team_id == home.id,
+                    EventRow.away_team_id == away.id,
+                    EventRow.kickoff_time_utc == event.kickoff_time_utc,
+                )
+            )
+        if row is None:
+            row = EventRow(
+                id=event.id,
+                competition_id=competition.id,
+                home_team_id=home.id,
+                away_team_id=away.id,
+                kickoff_time_utc=event.kickoff_time_utc,
+                status=event.status,
+            )
+            session.add(row)
+            await session.flush()
+        else:
+            row.status = event.status
         return row
 
     async def _team(self, session: AsyncSession, name: str, sport: str) -> TeamRow:

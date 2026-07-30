@@ -98,6 +98,27 @@
 
       <section class="panel unmatched-panel">
         <div class="panel-heading">
+          <div><p class="eyebrow">Approved event mappings</p><h3>Matched events</h3></div>
+          <div class="audit-tools">
+            <select id="matchedProviderFilter" aria-label="Filter matched events by provider">
+              <option value="">All prediction providers</option>
+            </select>
+            <span class="audit-count matched-count" id="matchedCount">—</span>
+          </div>
+        </div>
+        <p class="panel-copy">Prediction-market events that matched an OddsPapi fixture exactly or through an approved canonical alias.</p>
+        <div class="unmatched-list" id="matchedList"><div class="skeleton row-skeleton"></div></div>
+        <div class="pagination hidden" id="matchedPagination">
+          <span id="matchedPageSummary">—</span>
+          <div>
+            <button id="matchedPrevious" type="button">← Previous</button>
+            <button id="matchedNext" type="button">Next →</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel unmatched-panel">
+        <div class="panel-heading">
           <div><p class="eyebrow">Event matching audit</p><h3>Discovered but unmatched</h3></div>
           <div class="audit-tools">
             <select id="unmatchedProviderFilter" aria-label="Filter unmatched events by provider">

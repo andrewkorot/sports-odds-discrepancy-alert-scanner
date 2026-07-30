@@ -85,7 +85,7 @@ Every variable is also present in `.env.example`.
 | `ALERT_COOLDOWN_MINUTES` | Duplicate alert cooldown (`10`) |
 | `REALERT_EDGE_INCREASE_PP` | Early re-alert edge improvement (`1.0`) |
 | `PRICE_POLL_INTERVAL_SECONDS` | Recurring scan interval (`30`) |
-| `DISCOVERY_INTERVAL_SECONDS` | Full discovery interval (`300`) |
+| `PROVIDER_REQUEST_CONCURRENCY` | Maximum simultaneous provider pricing requests (`8`) |
 | `EVENT_MATCH_KICKOFF_TOLERANCE_MINUTES` | Cross-provider kickoff tolerance (`15`) |
 | `EVENT_MATCH_FUZZY_MIN_SCORE` | Minimum weighted score for a manual-review candidate (`80`) |
 | `EVENT_MATCH_AMBIGUITY_MARGIN` | Minimum lead over the runner-up candidate (`5`) |

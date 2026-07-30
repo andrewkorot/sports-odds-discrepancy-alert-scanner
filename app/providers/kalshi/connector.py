@@ -186,6 +186,12 @@ class KalshiConnector:
                 if extracted is None:
                     continue
                 participant_one, participant_two, source = extracted
+                orientation_known = source in {
+                    "event_title",
+                    "event_sub_title",
+                    "product_metadata:home_team,away_team",
+                    "product_metadata:homeTeam,awayTeam",
+                }
                 competition = str(event.product_metadata.get("competition") or "").strip()
                 records.append(
                     ProviderEvent(
@@ -195,9 +201,11 @@ class KalshiConnector:
                         category=competition or event.category,
                         sport="soccer",
                         competition=competition or None,
+                        home_team=participant_one if orientation_known else None,
+                        away_team=participant_two if orientation_known else None,
                         participant_one=participant_one,
                         participant_two=participant_two,
-                        orientation_known=False,
+                        orientation_known=orientation_known,
                         extraction_source=source,
                         scheduled_start=scheduled,
                         status=event.status,
@@ -208,7 +216,7 @@ class KalshiConnector:
             if not cursor:
                 break
         self._health = self._health.model_copy(update={"events_discovered": len(records)})
-        print(f"Total events discovered: {len(records)}")
+        print(f"Total events from kalshi discovered: {len(records)}")
         # print(records)
         return records
 
@@ -260,7 +268,7 @@ class KalshiConnector:
             parts = re.split(r"\s+(?:vs?\.?|at|@)\s+", text, maxsplit=1, flags=re.IGNORECASE)
             if len(parts) == 2:
                 first = parts[0].strip(" -:()")
-                second = re.sub(r"\s+\([^)]*\)$", "", parts[1]).strip(" -:()")
+                second = KalshiConnector._strip_market_descriptor(parts[1])
                 if first and second and first.casefold() != second.casefold():
                     return first, second, source
 
@@ -275,6 +283,18 @@ class KalshiConnector:
         if len(outcomes) == 2:
             return outcomes[0], outcomes[1], "market_yes_sub_titles"
         return None
+
+    @staticmethod
+    def _strip_market_descriptor(value: str) -> str:
+        value = re.sub(r"\s+\([^)]*\)$", "", value).strip(" -:()")
+        matchup, separator, descriptor = value.partition(":")
+        if separator and re.search(
+            r"\b(regulation\s+time|90\s*minutes?|moneyline|match\s+winner)\b",
+            descriptor,
+            flags=re.IGNORECASE,
+        ):
+            return matchup.strip(" -:()")
+        return value
 
     async def discover_markets(self, event_id: str) -> list[ProviderMarket]:
         payload = cast(

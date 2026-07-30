@@ -37,6 +37,7 @@ class HealthResponse(BaseModel):
     required_bookmaker_coverage: dict[str, str]
     last_successful_update: str | None
     last_scan_error: str | None = None
+    scan_in_progress: bool = False
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -62,6 +63,7 @@ async def health(request: Request) -> HealthResponse:
         required_bookmaker_coverage=coverage,
         last_successful_update=scanner.last_updated.isoformat() if scanner.last_updated else None,
         last_scan_error=orchestrator(request).last_scan_error,
+        scan_in_progress=orchestrator(request).scan_in_progress,
     )
 
 
@@ -172,7 +174,6 @@ async def settings(request: Request) -> dict[str, object]:
         "max_hours_before_kickoff": current.max_hours_before_kickoff,
         "alert_cooldown_minutes": current.alert_cooldown_minutes,
         "realert_edge_increase_pp": current.realert_edge_increase_pp,
-        "oddspapi_poll_interval_seconds": current.oddspapi_poll_interval_seconds,
         "app_mode": current.app_mode,
         "kalshi_mode": current.kalshi_mode,
         "polymarket_mode": current.polymarket_mode,
@@ -181,6 +182,7 @@ async def settings(request: Request) -> dict[str, object]:
         "alerts_enabled": current.alerts_enabled,
         "telegram_enabled": current.telegram_enabled,
         "price_poll_interval_seconds": current.price_poll_interval_seconds,
+        "provider_request_concurrency": current.provider_request_concurrency,
         "client_timezone": current.client_timezone,
         "enabled_market_types": current.enabled_market_types,
         "enabled_sports": current.enabled_sports,

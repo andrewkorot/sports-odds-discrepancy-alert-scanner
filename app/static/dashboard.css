@@ -278,6 +278,7 @@ tbody tr:hover { background: #fbfcfb; }
 .unmatched-panel { margin-top: 12px; }
 .panel-copy { max-width: 760px; margin: -5px 0 14px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .audit-count { min-width: 30px; height: 25px; display: grid; place-items: center; border-radius: 999px; color: var(--warning); background: var(--warning-soft); font-size: 10px; font-weight: 800; }
+.audit-count.matched-count { color: var(--brand); background: var(--brand-soft); }
 .audit-tools { display: flex; align-items: center; gap: 8px; }
 .audit-tools select { min-height: 32px; }
 .unmatched-list { display: grid; }
