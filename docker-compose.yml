@@ -28,6 +28,7 @@ services:
     build: .
     environment:
       APP_ENV: ${APP_ENV:-development}
+      DASHBOARD_UI: ${DASHBOARD_UI:-simple}
       APP_MODE: ${APP_MODE:-mock}
       MOCK_MODE: ${MOCK_MODE:-true}
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://scanner:scanner@postgres:5432/scanner}

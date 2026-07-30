@@ -163,6 +163,7 @@ async def settings(request: Request) -> dict[str, object]:
     current = state(request).settings
     return {
         "app_env": current.app_env,
+        "dashboard_ui": current.dashboard_ui,
         "mock_mode": current.mock_mode,
         "enabled_bookmakers": current.enabled_bookmakers,
         "edge_threshold_pp": current.edge_threshold_pp,

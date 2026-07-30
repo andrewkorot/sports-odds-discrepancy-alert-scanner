@@ -51,6 +51,7 @@ Every variable is also present in `.env.example`.
 | Variable | Meaning / default |
 |---|---|
 | `APP_ENV` | Environment name (`development`) |
+| `DASHBOARD_UI` | Dashboard selection: `simple` (default) or preserved `full` UI |
 | `APP_MODE` | Application orchestration mode (`mock` or `live`) |
 | `MOCK_MODE` | Deterministic providers; no credentials (`true`) |
 | `DATABASE_URL` | SQLAlchemy async PostgreSQL URL |

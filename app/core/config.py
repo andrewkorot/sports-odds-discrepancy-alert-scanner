@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
     app_env: str = "development"
+    dashboard_ui: str = "simple"
     app_mode: str = "mock"
     mock_mode: bool = True
     database_url: str = "postgresql+asyncpg://scanner:scanner@postgres:5432/scanner"
@@ -97,6 +98,14 @@ class Settings(BaseSettings):
     def validate_app_mode(cls, value: str) -> str:
         if value not in {"mock", "live"}:
             raise ValueError("APP_MODE must be mock or live")
+        return value
+
+    @field_validator("dashboard_ui")
+    @classmethod
+    def validate_dashboard_ui(cls, value: str) -> str:
+        value = value.casefold()
+        if value not in {"simple", "full"}:
+            raise ValueError("DASHBOARD_UI must be simple or full")
         return value
 
     @field_validator("kalshi_mode", "polymarket_mode", "sports_odds_mode")

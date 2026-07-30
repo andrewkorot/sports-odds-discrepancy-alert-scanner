@@ -44,15 +44,33 @@ async def test_dashboard_and_static_assets(client: AsyncClient) -> None:
     script = await client.get("/static/dashboard.js")
 
     assert dashboard.status_code == 200
-    assert "PitchEdge" in dashboard.text
-    assert 'id="matchedList"' in dashboard.text
-    assert 'id="matchedProviderFilter"' in dashboard.text
+    assert "Price Discrepancy Scanner" in dashboard.text
+    assert 'id="opportunities"' in dashboard.text
+    assert 'id="matched"' in dashboard.text
+    assert 'id="unmatched"' in dashboard.text
+    assert 'id="opportunitySearch"' in dashboard.text
+    assert 'id="matchedPagination"' in dashboard.text
+    assert 'id="unmatchedProvider"' in dashboard.text
     assert stylesheet.status_code == 200
-    assert "mobile-nav" in stylesheet.text
+    assert ".table-wrap" in stylesheet.text
     assert script.status_code == 200
     assert 'get("/opportunities")' in script.text
     assert 'get("/event-matches")' in script.text
     assert (await client.get("/event-matches")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_full_dashboard_can_be_reenabled() -> None:
+    app = create_app(Settings(dashboard_ui="full"))
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/")
+
+    assert response.status_code == 200
+    assert "PitchEdge" in response.text
+    assert 'id="matchedList"' in response.text
 
 
 @pytest.mark.asyncio

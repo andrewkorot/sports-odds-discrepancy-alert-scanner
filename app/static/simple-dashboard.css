@@ -1,0 +1,42 @@
+:root {
+  color-scheme: light;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #171717;
+  background: #f4f4f4;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { width: min(1500px, 100%); margin: 0 auto; padding: 24px; }
+header { display: flex; justify-content: space-between; gap: 20px; align-items: center; margin-bottom: 24px; }
+h1, h2, p { margin: 0; }
+h1 { font-size: 24px; }
+header p { margin-top: 7px; color: #666; font-size: 13px; }
+button { padding: 9px 15px; border: 1px solid #bbb; border-radius: 5px; background: white; cursor: pointer; }
+section { margin-bottom: 22px; padding: 18px; background: white; border: 1px solid #ddd; border-radius: 6px; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
+.section-heading h2 { font-size: 17px; }
+.section-heading span { padding: 3px 8px; border-radius: 10px; background: #eee; font-size: 12px; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.filters input, .filters select { min-height: 34px; padding: 6px 9px; border: 1px solid #ccc; border-radius: 4px; background: white; font-size: 12px; }
+.filters input { min-width: 230px; flex: 1; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th, td { padding: 9px; border: 1px solid #ddd; text-align: left; vertical-align: top; }
+th { background: #f5f5f5; white-space: nowrap; }
+.edge { color: #08783e; font-weight: 700; }
+.reason { color: #9c2929; }
+.empty { padding: 18px 4px 4px; color: #777; font-size: 12px; }
+.hidden { display: none; }
+.pagination { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding-top: 12px; font-size: 12px; color: #666; }
+.pagination button { padding: 5px 9px; }
+.pagination button:disabled { color: #aaa; cursor: default; }
+
+@media (max-width: 700px) {
+  main { padding: 12px; }
+  header { align-items: flex-start; }
+  h1 { font-size: 20px; }
+  section { padding: 12px; }
+  .filters input, .filters select { width: 100%; min-width: 100%; }
+  th, td { padding: 7px; min-width: 110px; }
+}

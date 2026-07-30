@@ -14,9 +14,10 @@ from app.services.scanner import ScannerState
 def create_app(settings: Settings | None = None) -> FastAPI:
     configured = settings or get_settings()
     static_dir = Path(__file__).parent / "static"
-    dashboard_html = (static_dir / "dashboard.html").read_text()
-    dashboard_css = (static_dir / "dashboard.css").read_text()
-    dashboard_js = (static_dir / "dashboard.js").read_text()
+    dashboard_prefix = "dashboard" if configured.dashboard_ui == "full" else "simple-dashboard"
+    dashboard_html = (static_dir / f"{dashboard_prefix}.html").read_text()
+    dashboard_css = (static_dir / f"{dashboard_prefix}.css").read_text()
+    dashboard_js = (static_dir / f"{dashboard_prefix}.js").read_text()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

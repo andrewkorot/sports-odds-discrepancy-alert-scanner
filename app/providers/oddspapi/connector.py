@@ -51,6 +51,8 @@ class SportsOddsConnector:
             provider=Provider.ODDSPAPI, mode=mode, enabled=True, connected=False
         )
         self._market_catalog: dict[tuple[int, int], tuple[str, str, str]] = {}
+        self._market_catalog_loaded = False
+        self._market_catalog_lock = asyncio.Lock()
         self._bookmaker_catalog: tuple[list[Bookmaker], list[str]] | None = None
         self._canonical_by_provider_id: dict[str, str] = {}
         self._last_odds_request_started = 0.0
@@ -218,26 +220,32 @@ class SportsOddsConnector:
         return records
 
     async def _ensure_market_catalog(self) -> None:
-        if self._market_catalog:
+        if self._market_catalog_loaded:
             return
-        payload = cast(list[dict[str, Any]], await self._get("/markets", {"language": "en"}))
-        selection_names = {"1": "home", "x": "draw", "2": "away"}
-        for market in payload:
-            if (
-                int(market.get("sportId", -1)) != SPORT_ID_SOCCER
-                or bool(market.get("playerProp"))
-                or str(market.get("period", "")).casefold() != "fulltime"
-                or str(market.get("marketType", "")).casefold() != "1x2"
-            ):
-                continue
-            for outcome in cast(list[dict[str, Any]], market.get("outcomes", [])):
-                selection = selection_names.get(str(outcome.get("outcomeName", "")).casefold())
-                if selection:
-                    self._market_catalog[(int(market["marketId"]), int(outcome["outcomeId"]))] = (
-                        "moneyline",
-                        selection,
-                        "regulation",
-                    )
+        async with self._market_catalog_lock:
+            if self._market_catalog_loaded:
+                return
+            payload = cast(list[dict[str, Any]], await self._get("/markets", {"language": "en"}))
+            selection_names = {"1": "home", "x": "draw", "2": "away"}
+            for market in payload:
+                if (
+                    int(market.get("sportId", -1)) != SPORT_ID_SOCCER
+                    or bool(market.get("playerProp"))
+                    or str(market.get("period", "")).casefold() != "fulltime"
+                    or str(market.get("marketType", "")).casefold() != "1x2"
+                ):
+                    continue
+                for outcome in cast(list[dict[str, Any]], market.get("outcomes", [])):
+                    selection = selection_names.get(str(outcome.get("outcomeName", "")).casefold())
+                    if selection:
+                        self._market_catalog[
+                            (int(market["marketId"]), int(outcome["outcomeId"]))
+                        ] = (
+                            "moneyline",
+                            selection,
+                            "regulation",
+                        )
+            self._market_catalog_loaded = True
 
     async def health(self) -> ProviderHealthRecord:
         return self._health
