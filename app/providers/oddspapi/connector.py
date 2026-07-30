@@ -92,18 +92,23 @@ class SportsOddsConnector:
     async def discover_events(
         self, start_time: datetime, end_time: datetime
     ) -> list[ProviderEvent]:
+        fixture_params: dict[str, Any] = {
+            "sportId": SPORT_ID_SOCCER,
+            "from": start_time.isoformat(),
+            "to": end_time.isoformat(),
+            "statusId": 0,
+            "hasOdds": "true",
+        }
+        # OddsPapi expects its own bookmaker slugs here, not our canonical IDs.
+        # The catalog is mapped before discovery in the live pipeline, so this
+        # limits discovery to fixtures having odds at any configured bookmaker.
+        provider_slugs = sorted(self._canonical_by_provider_id)
+        if provider_slugs:
+            fixture_params["bookmakers"] = ",".join(provider_slugs)
+
         payload = cast(
             list[dict[str, Any]],
-            await self._get(
-                "/fixtures",
-                {
-                    "sportId": 10,
-                    "from": start_time.isoformat(),
-                    "to": end_time.isoformat(),
-                    "statusId": 0,
-                    "hasOdds": "true",
-                },
-            ),
+            await self._get("/fixtures", fixture_params),
         )
         records = [
             ProviderEvent(

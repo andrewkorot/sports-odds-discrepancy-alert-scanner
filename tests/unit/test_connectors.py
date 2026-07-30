@@ -371,7 +371,7 @@ async def test_oddspapi_v4_fixture_discovery_contract() -> None:
         assert request.url.params["sportId"] == "10"
         assert request.url.params["statusId"] == "0"
         assert request.url.params["hasOdds"] == "true"
-        assert "bookmakers" not in request.url.params
+        assert request.url.params["bookmakers"] == "bookmaker.eu,pinnacle-sports"
         assert "from" in request.url.params and "to" in request.url.params
         return httpx.Response(
             200,
@@ -390,7 +390,29 @@ async def test_oddspapi_v4_fixture_discovery_contract() -> None:
         )
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    connector = SportsOddsConnector("secret", "https://api.oddspapi.io/v4", ["pinnacle"], client)
+    connector = SportsOddsConnector(
+        "secret",
+        "https://api.oddspapi.io/v4",
+        ["bookmaker_eu", "pinnacle"],
+        client,
+    )
+    connector.use_provider_bookmaker_ids(
+        [
+            Bookmaker(
+                canonical_id="bookmaker_eu",
+                display_name="BookMaker.eu",
+                provider_bookmaker_id="bookmaker.eu",
+                availability_status=AvailabilityStatus.AVAILABLE,
+            ),
+            Bookmaker(
+                canonical_id="pinnacle",
+                display_name="Pinnacle",
+                provider_bookmaker_id="pinnacle-sports",
+                availability_status=AvailabilityStatus.AVAILABLE,
+            ),
+        ],
+        ["bookmaker_eu", "pinnacle"],
+    )
     start = datetime(2026, 7, 30, 12, tzinfo=UTC)
     events = await connector.discover_events(start, start + timedelta(hours=24))
     assert events[0].provider_event_id == "fixture-1"
