@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     sports_odds_api_key: str | None = None
     sports_odds_base_url: str = "https://api.oddspapi.io/v4"
+    oddspapi_discovery_dump_path: str | None = "runtime/oddspapi_discovered_events.json"
     oddspapi_api_key: str | None = None  # Backward-compatible alias.
     oddspapi_base_url: str = "https://api.oddspapi.io/v4"
     kalshi_api_key_id: str | None = None

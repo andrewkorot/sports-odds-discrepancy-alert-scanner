@@ -364,7 +364,7 @@ def test_oddspapi_error_sanitization_does_not_include_request_url() -> None:
 
 
 @pytest.mark.asyncio
-async def test_oddspapi_v4_fixture_discovery_contract() -> None:
+async def test_oddspapi_v4_fixture_discovery_contract(tmp_path: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v4/fixtures"
         assert request.url.params["apiKey"] == "secret"
@@ -395,6 +395,7 @@ async def test_oddspapi_v4_fixture_discovery_contract() -> None:
         "https://api.oddspapi.io/v4",
         ["bookmaker_eu", "pinnacle"],
         client,
+        discovery_dump_path=str(tmp_path / "oddspapi-events.json"),
     )
     connector.use_provider_bookmaker_ids(
         [
@@ -418,6 +419,11 @@ async def test_oddspapi_v4_fixture_discovery_contract() -> None:
     assert events[0].provider_event_id == "fixture-1"
     assert events[0].title == "Inter Miami CF vs Atlanta United"
     assert events[0].scheduled_start == datetime(2026, 7, 30, 20, tzinfo=UTC)
+    dump = json.loads((tmp_path / "oddspapi-events.json").read_text())
+    assert dump["record_count"] == 1
+    assert dump["bookmaker_slugs"] == ["bookmaker.eu", "pinnacle-sports"]
+    assert dump["records"][0]["fixtureId"] == "fixture-1"
+    assert "apiKey" not in json.dumps(dump)
     await client.aclose()
 
 

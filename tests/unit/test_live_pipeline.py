@@ -494,3 +494,111 @@ def test_event_index_shortlists_before_fuzzy_scoring() -> None:
     candidates = index.candidates(prediction, tolerance_minutes=15)
 
     assert [event.provider_event_id for event in candidates] == ["target"]
+
+
+def test_kalshi_lexington_uses_ordered_teams_and_usl_competition_alias() -> None:
+    kickoff = datetime(2026, 7, 30, 20, tzinfo=UTC)
+    prediction = ProviderEvent(
+        provider=Provider.KALSHI,
+        provider_event_id="kalshi-lexington",
+        title="Lexington SC vs. Monterey Bay FC: Regulation Time Moneyline",
+        sport="soccer",
+        competition="USL Championship",
+        home_team="Lexington SC",
+        away_team="Monterey Bay FC",
+        participant_one="Lexington SC",
+        participant_two="Monterey Bay FC",
+        orientation_known=True,
+        extraction_source="event_title",
+        scheduled_start=kickoff,
+        status="open",
+    )
+    correct = ProviderEvent(
+        provider=Provider.ODDSPAPI,
+        provider_event_id="oddspapi-lexington",
+        title="Lexington SC vs Monterey Bay FC",
+        sport="soccer",
+        competition="USA - USL Championship",
+        home_team="Lexington SC",
+        away_team="Monterey Bay FC",
+        scheduled_start=kickoff,
+        status="open",
+    )
+    wrong_nearby = ProviderEvent(
+        provider=Provider.ODDSPAPI,
+        provider_event_id="oddspapi-wrong",
+        title="Charleston Battery vs Louisville City",
+        sport="soccer",
+        competition="USA - USL Championship",
+        home_team="Charleston Battery",
+        away_team="Louisville City",
+        scheduled_start=kickoff,
+        status="open",
+    )
+
+    candidates = SportsbookEventIndex(
+        [wrong_nearby, correct],
+        tolerance_minutes=15,
+    ).candidates(prediction, tolerance_minutes=15)
+    matched, audit = audit_prediction_event(prediction, candidates, 15)
+
+    assert [event.provider_event_id for event in candidates] == ["oddspapi-lexington"]
+    assert matched == correct
+    assert audit.matched
+    assert audit.sportsbook_home_team == "Lexington SC"
+    assert audit.sportsbook_away_team == "Monterey Bay FC"
+
+
+def test_kalshi_lexington_reports_kickoff_mismatch_against_correct_fixture() -> None:
+    kalshi_kickoff = datetime(2026, 8, 2, 2, tzinfo=UTC)
+    oddspapi_kickoff = kalshi_kickoff - timedelta(hours=3)
+    prediction = ProviderEvent(
+        provider=Provider.KALSHI,
+        provider_event_id="kalshi-lexington",
+        title="Lexington SC vs. Monterey Bay FC: Regulation Time Moneyline",
+        sport="soccer",
+        competition="USL Championship",
+        home_team="Lexington SC",
+        away_team="Monterey Bay FC",
+        participant_one="Lexington SC",
+        participant_two="Monterey Bay FC",
+        orientation_known=True,
+        extraction_source="event_title",
+        scheduled_start=kalshi_kickoff,
+        status="open",
+    )
+    correct = ProviderEvent(
+        provider=Provider.ODDSPAPI,
+        provider_event_id="oddspapi-lexington",
+        title="Lexington SC vs Monterey Bay FC",
+        sport="soccer",
+        competition="USA - USL Championship",
+        home_team="Lexington SC",
+        away_team="Monterey Bay FC",
+        scheduled_start=oddspapi_kickoff,
+        status="open",
+    )
+    wrong_nearby = ProviderEvent(
+        provider=Provider.ODDSPAPI,
+        provider_event_id="oddspapi-wrong",
+        title="Charleston Battery vs Louisville City",
+        sport="soccer",
+        competition="USA - USL Championship",
+        home_team="Charleston Battery",
+        away_team="Louisville City",
+        scheduled_start=kalshi_kickoff,
+        status="open",
+    )
+
+    candidates = SportsbookEventIndex(
+        [wrong_nearby, correct],
+        tolerance_minutes=15,
+    ).candidates(prediction, tolerance_minutes=15)
+    matched, audit = audit_prediction_event(prediction, candidates, 15)
+
+    assert [event.provider_event_id for event in candidates] == ["oddspapi-lexington"]
+    assert matched is None
+    assert audit.sportsbook_event_id == "oddspapi-lexington"
+    assert "kickoff_outside_tolerance" in audit.rejection_reasons
+    assert "home_team_mismatch" not in audit.rejection_reasons
+    assert "away_team_mismatch" not in audit.rejection_reasons

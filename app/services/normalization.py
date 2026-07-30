@@ -28,6 +28,12 @@ COMPETITION_ALIASES = {
     "uefa champions league": "champions league",
     "champions league": "champions league",
     "ucl": "champions league",
+    "usa usl championship": "usl championship",
+    "us usl championship": "usl championship",
+    "usl championship": "usl championship",
+    "national womens soccer league": "nwsl",
+    "national women s soccer league": "nwsl",
+    "nwsl": "nwsl",
 }
 
 _CLUB_SUFFIXES = {"fc", "cf", "sc", "afc"}
@@ -52,6 +58,7 @@ _COUNTRY_PREFIXES = {
     "mexico": "mexico",
     "mexican": "mexico",
 }
+_COMPETITION_PHASE_SUFFIX = re.compile(r"\s+(?:apertura|clausura)(?:\s+20\d{2})?$")
 
 
 @dataclass(frozen=True)
@@ -222,6 +229,10 @@ def _competition_identity(
     normalized = normalize_text(value)
     mapping = _normalized_aliases(COMPETITION_ALIASES, aliases)
     canonical = mapping.get(normalized, normalized)
+    # Some feeds append a Mexican season phase to the league display name.
+    # Preserve it in raw metadata, but compare the underlying competition.
+    canonical = _COMPETITION_PHASE_SUFFIX.sub("", canonical)
+    canonical = mapping.get(canonical, canonical)
     detected_country = normalize_text(country) if country else None
     if detected_country is None:
         for prefix, canonical_country in _COUNTRY_PREFIXES.items():

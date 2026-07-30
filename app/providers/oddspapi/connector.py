@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import os
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from time import perf_counter
 from typing import Any, cast
 
@@ -21,6 +25,7 @@ from app.providers.records import (
 )
 
 SPORT_ID_SOCCER = 10
+logger = logging.getLogger("uvicorn.error")
 
 
 def sanitized_error(exc: Exception) -> str:
@@ -41,6 +46,7 @@ class SportsOddsConnector:
         bookmaker_slugs: list[str],
         client: httpx.AsyncClient | None = None,
         mode: str = "live",
+        discovery_dump_path: str | None = None,
     ) -> None:
         self._api_key = api_key
         self._base = base_url.rstrip("/")
@@ -56,6 +62,50 @@ class SportsOddsConnector:
         self._bookmaker_catalog: tuple[list[Bookmaker], list[str]] | None = None
         self._canonical_by_provider_id: dict[str, str] = {}
         self._last_odds_request_started = 0.0
+        self._discovery_dump_path = Path(discovery_dump_path) if discovery_dump_path else None
+
+    @staticmethod
+    def _write_discovery_dump(path: Path, document: dict[str, Any]) -> None:
+        """Atomically replace the latest raw fixture snapshot."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+        temporary_path.write_text(
+            json.dumps(document, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        os.replace(temporary_path, path)
+
+    async def _dump_discovered_events(
+        self,
+        payload: list[dict[str, Any]],
+        start_time: datetime,
+        end_time: datetime,
+        provider_slugs: list[str],
+    ) -> None:
+        if self._discovery_dump_path is None:
+            return
+        document = {
+            "provider": Provider.ODDSPAPI.value,
+            "fetched_at_utc": datetime.now(UTC).isoformat(),
+            "window_start_utc": start_time.isoformat(),
+            "window_end_utc": end_time.isoformat(),
+            "bookmaker_slugs": provider_slugs,
+            "record_count": len(payload),
+            "records": payload,
+        }
+        try:
+            await asyncio.to_thread(
+                self._write_discovery_dump,
+                self._discovery_dump_path,
+                document,
+            )
+        except OSError as exc:
+            # A diagnostics export must not make the live scan fail.
+            logger.warning(
+                "oddspapi.discovery_dump.failed path=%s error_type=%s",
+                self._discovery_dump_path,
+                type(exc).__name__,
+            )
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         attempted = datetime.now(UTC)
@@ -109,6 +159,12 @@ class SportsOddsConnector:
         payload = cast(
             list[dict[str, Any]],
             await self._get("/fixtures", fixture_params),
+        )
+        await self._dump_discovered_events(
+            payload,
+            start_time,
+            end_time,
+            provider_slugs,
         )
         records = [
             ProviderEvent(

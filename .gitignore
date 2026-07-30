@@ -13,3 +13,4 @@ build/
 .idea/
 .vscode/
 kalshi_private_key.pem
+runtime/

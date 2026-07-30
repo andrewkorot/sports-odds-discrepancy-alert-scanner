@@ -7,6 +7,7 @@ const number = (value, digits = 1) => Number(value ?? 0).toLocaleString(undefine
 const money = (value) => `$${Number(value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 const pct = (value, digits = 1) => `${number(Number(value) * 100, digits)}%`;
 const title = (value) => String(value ?? "").replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
+const searchable = (...values) => values.flat(Infinity).filter(value => value != null).join(" ").toLocaleLowerCase();
 const age = (date) => {
   if (!date) return "Never";
   const seconds = Math.max(0, Math.round((Date.now() - new Date(date).getTime()) / 1000));
@@ -79,7 +80,16 @@ function renderMatchedEvents() {
   providerFilter.innerHTML = `<option value="">All prediction providers</option>${providers.map(provider => `<option value="${esc(provider)}">${title(provider)}</option>`).join("")}`;
   providerFilter.value = providers.includes(selectedProvider) ? selectedProvider : "";
 
-  const matched = allMatched.filter(item => !providerFilter.value || item.provider === providerFilter.value);
+  const search = $("#matchedSearch").value.trim().toLocaleLowerCase();
+  const matched = allMatched.filter(item =>
+    (!providerFilter.value || item.provider === providerFilter.value) &&
+    (!search || searchable(
+      item.provider, item.provider_event_id, item.title, item.competition,
+      item.home_team, item.away_team, item.participant_one, item.participant_two,
+      item.sportsbook_event_id, item.sportsbook_title, item.sportsbook_competition,
+      item.sportsbook_home_team, item.sportsbook_away_team, item.match_confidence
+    ).includes(search))
+  );
   const pageCount = Math.max(1, Math.ceil(matched.length / state.matchedPageSize));
   state.matchedPage = Math.min(state.matchedPage, pageCount);
   const pageStart = (state.matchedPage - 1) * state.matchedPageSize;
@@ -147,7 +157,18 @@ function renderUnmatchedEvents() {
   providerFilter.innerHTML = `<option value="">All providers</option>${providers.map(provider => `<option value="${esc(provider)}">${title(provider)}</option>`).join("")}`;
   providerFilter.value = providers.includes(selectedProvider) ? selectedProvider : "";
 
-  const unmatched = allUnmatched.filter(item => !providerFilter.value || item.provider === providerFilter.value);
+  const search = $("#unmatchedSearch").value.trim().toLocaleLowerCase();
+  const unmatched = allUnmatched.filter(item =>
+    (!providerFilter.value || item.provider === providerFilter.value) &&
+    (!search || searchable(
+      item.provider, item.provider_event_id, item.title, item.competition,
+      item.normalized_competition, item.home_team, item.normalized_home_team,
+      item.away_team, item.normalized_away_team, item.participant_one,
+      item.participant_two, item.sportsbook_event_id, item.sportsbook_title,
+      item.sportsbook_competition, item.sportsbook_home_team,
+      item.sportsbook_away_team, item.match_confidence, item.rejection_reasons
+    ).includes(search))
+  );
   const pageCount = Math.max(1, Math.ceil(unmatched.length / state.unmatchedPageSize));
   state.unmatchedPage = Math.min(state.unmatchedPage, pageCount);
   const pageStart = (state.unmatchedPage - 1) * state.unmatchedPageSize;
@@ -353,7 +374,13 @@ function renderOpportunityTable() {
 
 function renderCandidates() {
   const sport = $("#candidateSportFilter").value, status = $("#candidateStatusFilter").value, reason = $("#candidateReasonFilter").value, market = $("#candidateMarketFilter").value;
-  const rows = state.candidates.filter(c => (!sport || c.prediction_quote.sport === sport) && (!status || (status === "accepted") === c.accepted) && (!reason || c.rejection_reasons.includes(reason)) && (!market || c.prediction_quote.market_type === market)).slice(0, 120);
+  const search = $("#candidateSearch").value.trim().toLocaleLowerCase();
+  const rows = state.candidates.filter(c => (!sport || c.prediction_quote.sport === sport) && (!status || (status === "accepted") === c.accepted) && (!reason || c.rejection_reasons.includes(reason)) && (!market || c.prediction_quote.market_type === market) && (!search || searchable(
+    c.prediction_quote.home_team, c.prediction_quote.away_team,
+    c.prediction_quote.competition, c.prediction_quote.provider,
+    c.prediction_quote.provider_event_id, c.prediction_quote.provider_market_id,
+    c.prediction_quote.market_type, c.rejection_reasons
+  ).includes(search))).slice(0, 120);
   $("#candidateList").innerHTML = rows.map(c => `<article class="candidate-card">
     <div><span class="cell-main">${esc(c.prediction_quote.home_team)} vs ${esc(c.prediction_quote.away_team)}</span><span class="cell-sub">${title(c.prediction_quote.sport)} · ${title(c.prediction_quote.provider)} · ${title(c.prediction_quote.market_type)} · ${esc(selectionLabel(c.prediction_quote))}</span></div>
     <div><span class="cell-sub">Spread</span><span class="cell-main">${c.liquidity.spread_cents == null ? "—" : `${number(c.liquidity.spread_cents,1)}¢`}</span></div>
@@ -410,6 +437,15 @@ $("#matchedProviderFilter").addEventListener("change", () => {
   state.matchedPage = 1;
   renderMatchedEvents();
 });
+$("#matchedSearch").addEventListener("input", () => {
+  state.matchedPage = 1;
+  renderMatchedEvents();
+});
+$("#unmatchedSearch").addEventListener("input", () => {
+  state.unmatchedPage = 1;
+  renderUnmatchedEvents();
+});
+$("#candidateSearch").addEventListener("input", renderCandidates);
 $("#matchedPrevious").addEventListener("click", () => {
   state.matchedPage = Math.max(1, state.matchedPage - 1);
   renderMatchedEvents();

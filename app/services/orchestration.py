@@ -96,6 +96,7 @@ class ScanOrchestrator:
                 api_key,
                 self.settings.sports_odds_base_url,
                 self.settings.enabled_bookmakers,
+                discovery_dump_path=self.settings.oddspapi_discovery_dump_path,
             )
         elif self.settings.sports_odds_mode == "disabled":
             self._health[Provider.ODDSPAPI] = self._disabled(Provider.ODDSPAPI)

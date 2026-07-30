@@ -100,6 +100,7 @@
         <div class="panel-heading">
           <div><p class="eyebrow">Approved event mappings</p><h3>Matched events</h3></div>
           <div class="audit-tools">
+            <label class="search-field audit-search"><span>⌕</span><input id="matchedSearch" type="search" placeholder="Search matched events" aria-label="Search matched events"></label>
             <select id="matchedProviderFilter" aria-label="Filter matched events by provider">
               <option value="">All prediction providers</option>
             </select>
@@ -121,6 +122,7 @@
         <div class="panel-heading">
           <div><p class="eyebrow">Event matching audit</p><h3>Discovered but unmatched</h3></div>
           <div class="audit-tools">
+            <label class="search-field audit-search"><span>⌕</span><input id="unmatchedSearch" type="search" placeholder="Search unmatched events" aria-label="Search unmatched events"></label>
             <select id="unmatchedProviderFilter" aria-label="Filter unmatched events by provider">
               <option value="">All providers</option>
             </select>
@@ -161,6 +163,7 @@
         <select id="candidateStatusFilter"><option value="">All decisions</option><option value="accepted">Accepted</option><option value="rejected">Rejected</option></select>
         <select id="candidateReasonFilter"><option value="">All reasons</option></select>
         <select id="candidateMarketFilter"><option value="">All markets</option><option value="moneyline">Moneyline</option><option value="total">Totals</option><option value="spread">Spread</option><option value="btts">BTTS</option></select>
+        <label class="search-field"><span>⌕</span><input id="candidateSearch" type="search" placeholder="Search event, league, or provider" aria-label="Search market candidates"></label>
       </div>
       <div class="candidate-list" id="candidateList"></div>
     </section>

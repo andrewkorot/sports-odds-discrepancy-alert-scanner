@@ -86,6 +86,8 @@ class SportsbookEventIndex:
         self._bucket_seconds = max(60, tolerance_minutes * 60)
         self._ordered: dict[tuple[str, str, str, str], list[ProviderEvent]] = {}
         self._unordered: dict[tuple[str, str, str, str], list[ProviderEvent]] = {}
+        self._ordered_teams: dict[tuple[str, str, str], list[ProviderEvent]] = {}
+        self._unordered_teams: dict[tuple[str, str, str], list[ProviderEvent]] = {}
         self._by_time: dict[tuple[str, int], list[ProviderEvent]] = {}
         for event in events:
             if event.scheduled_start is None:
@@ -99,11 +101,13 @@ class SportsbookEventIndex:
                     (sport, competition, home, away),
                     [],
                 ).append(event)
+                self._ordered_teams.setdefault((sport, home, away), []).append(event)
                 first, second = sorted((home, away))
                 self._unordered.setdefault(
                     (sport, competition, first, second),
                     [],
                 ).append(event)
+                self._unordered_teams.setdefault((sport, first, second), []).append(event)
             self._by_time.setdefault(
                 (sport, self._time_bucket(event.scheduled_start)),
                 [],
@@ -127,16 +131,20 @@ class SportsbookEventIndex:
                 )
             )
             exact = self._unordered.get((sport, competition, first, second), [])
+            same_teams = self._unordered_teams.get((sport, first, second), [])
         else:
+            home = normalize_team(prediction.home_team or "")
+            away = normalize_team(prediction.away_team or "")
             exact = self._ordered.get(
                 (
                     sport,
                     competition,
-                    normalize_team(prediction.home_team or ""),
-                    normalize_team(prediction.away_team or ""),
+                    home,
+                    away,
                 ),
                 [],
             )
+            same_teams = self._ordered_teams.get((sport, home, away), [])
         exact_in_window = self._within_window(
             exact,
             prediction.scheduled_start,
@@ -144,6 +152,22 @@ class SportsbookEventIndex:
         )
         if exact_in_window:
             return exact_in_window
+        # Preserve home/away orientation and let the full audit validate the
+        # competition. This prevents a provider league-label difference from
+        # replacing the true fixture with an unrelated nearby kickoff.
+        same_teams_in_window = self._within_window(
+            same_teams,
+            prediction.scheduled_start,
+            tolerance_minutes,
+        )
+        if same_teams_in_window:
+            return same_teams_in_window
+        if same_teams:
+            # Keep the correct fixture in the audit even when its kickoff is
+            # outside tolerance. The full matcher will reject it with the true
+            # kickoff reason instead of showing an unrelated nearby fixture as
+            # the closest candidate.
+            return same_teams
 
         bucket = self._time_bucket(prediction.scheduled_start)
         nearby: dict[str, ProviderEvent] = {}

@@ -69,6 +69,13 @@ def test_competition_aliases_are_explicit() -> None:
     assert normalize_competition("English Premier League") == "premier league"
     assert normalize_competition("EPL") == "premier league"
     assert normalize_competition("Unrelated League") == "unrelated league"
+    assert normalize_competition("Liga de Expansion MX") == normalize_competition(
+        "Liga de Expansion MX, Apertura"
+    )
+    assert normalize_competition("Liga de Expansion MX") == normalize_competition(
+        "Liga de Expansion MX - Clausura 2026"
+    )
+    assert normalize_competition("NWSL") == normalize_competition("National Womens Soccer League")
 
 
 def test_competition_metadata_distinguishes_ambiguous_names() -> None:

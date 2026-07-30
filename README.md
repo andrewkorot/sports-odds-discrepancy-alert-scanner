@@ -58,6 +58,7 @@ Every variable is also present in `.env.example`.
 | `REDIS_URL` | Redis connection URL |
 | `SPORTS_ODDS_API_KEY` | OddsPapi consumer v4 key when its mode is live |
 | `SPORTS_ODDS_BASE_URL` | OddsPapi consumer v4 base URL |
+| `ODDSPAPI_DISCOVERY_DUMP_PATH` | Latest raw OddsPapi fixture snapshot; blank disables export |
 | `KALSHI_API_KEY_ID` | Read-scoped Kalshi API key ID |
 | `KALSHI_PRIVATE_KEY_PATH` | Kalshi signing key path, live mode only |
 | `KALSHI_MODE` | `mock`, `live`, or `disabled` |
