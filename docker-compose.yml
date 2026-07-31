@@ -64,3 +64,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  - ./kalshi_private_key.pem:/app/kalshi_private_key.pem:ro
