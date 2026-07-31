@@ -537,17 +537,43 @@ def audit_prediction_event(
     scored.sort(key=lambda item: item[0], reverse=True)
     best_score, best_candidate, breakdown, blockers, best_reasons = scored[0]
     runner_up = scored[1][0] if len(scored) > 1 else None
-    fuzzy_review = best_score >= fuzzy_min_score and not blockers
-    ambiguous = fuzzy_review and runner_up is not None and best_score - runner_up < ambiguity_margin
-    if fuzzy_review:
+    fuzzy_name_reasons = {
+        "home_team_mismatch",
+        "away_team_mismatch",
+        "competition_mismatch",
+    }
+    fuzzy_eligible = (
+        best_score >= fuzzy_min_score
+        and not blockers
+        and set(best_reasons).issubset(fuzzy_name_reasons)
+    )
+    ambiguous = (
+        fuzzy_eligible and runner_up is not None and best_score - runner_up < ambiguity_margin
+    )
+    if fuzzy_eligible and not ambiguous:
+        return best_candidate, EventMatchAudit(
+            **base,
+            matched=True,
+            match_confidence=MatchConfidence.APPROVED_ALIAS,
+            weighted_score=best_score,
+            runner_up_score=runner_up,
+            score_breakdown=breakdown,
+            sportsbook_event_id=best_candidate.provider_event_id,
+            sportsbook_title=best_candidate.title,
+            sportsbook_competition=best_candidate.competition or best_candidate.category,
+            sportsbook_home_team=best_candidate.home_team,
+            sportsbook_away_team=best_candidate.away_team,
+            sportsbook_kickoff_time_utc=best_candidate.scheduled_start,
+        )
+    if fuzzy_eligible:
         best_reasons = [
-            "ambiguous_candidate_margin" if ambiguous else "fuzzy_match_requires_manual_review",
+            "ambiguous_candidate_margin",
             *best_reasons,
         ]
     return None, EventMatchAudit(
         **base,
         match_confidence=(
-            MatchConfidence.MANUAL_REVIEW if fuzzy_review else MatchConfidence.REJECTED
+            MatchConfidence.MANUAL_REVIEW if fuzzy_eligible else MatchConfidence.REJECTED
         ),
         weighted_score=best_score,
         runner_up_score=runner_up,
@@ -644,17 +670,39 @@ def _audit_unordered_prediction(
         )
     best_score, closest, breakdown, blockers, closest_reasons = scored[0]
     runner_up = scored[1][0] if len(scored) > 1 else None
-    fuzzy_review = best_score >= fuzzy_min_score and not blockers
-    ambiguous = fuzzy_review and runner_up is not None and best_score - runner_up < ambiguity_margin
-    if fuzzy_review:
+    fuzzy_name_reasons = {"participant_pair_mismatch", "competition_mismatch"}
+    fuzzy_eligible = (
+        best_score >= fuzzy_min_score
+        and not blockers
+        and set(closest_reasons).issubset(fuzzy_name_reasons)
+    )
+    ambiguous = (
+        fuzzy_eligible and runner_up is not None and best_score - runner_up < ambiguity_margin
+    )
+    if fuzzy_eligible and not ambiguous:
+        return closest, EventMatchAudit(
+            **base,
+            matched=True,
+            match_confidence=MatchConfidence.APPROVED_ALIAS,
+            weighted_score=best_score,
+            runner_up_score=runner_up,
+            score_breakdown=breakdown,
+            sportsbook_event_id=closest.provider_event_id,
+            sportsbook_title=closest.title,
+            sportsbook_competition=closest.competition or closest.category,
+            sportsbook_home_team=closest.home_team,
+            sportsbook_away_team=closest.away_team,
+            sportsbook_kickoff_time_utc=closest.scheduled_start,
+        )
+    if fuzzy_eligible:
         closest_reasons = [
-            "ambiguous_candidate_margin" if ambiguous else "fuzzy_match_requires_manual_review",
+            "ambiguous_candidate_margin",
             *closest_reasons,
         ]
     return None, EventMatchAudit(
         **base,
         match_confidence=(
-            MatchConfidence.MANUAL_REVIEW if fuzzy_review else MatchConfidence.REJECTED
+            MatchConfidence.MANUAL_REVIEW if fuzzy_eligible else MatchConfidence.REJECTED
         ),
         weighted_score=best_score,
         runner_up_score=runner_up,
@@ -995,43 +1043,6 @@ async def collect_live_snapshot(
             return event, []
         return event, event_odds
 
-    odds_results = await asyncio.gather(
-        *(fetch_event_odds(event) for event in matched_sportsbook_events)
-    )
-    for event, event_odds in odds_results:
-        event_id = canonical_event_id(event)
-        for quote in event_odds:
-            if quote.bookmaker_id not in settings.enabled_bookmakers:
-                continue
-            sportsbooks.append(
-                SportsbookQuote(
-                    provider_event_id=event.provider_event_id,
-                    canonical_event_id=event_id,
-                    bookmaker_id=quote.bookmaker_id,
-                    bookmaker_display_name=CANONICAL_BOOKMAKERS.get(
-                        quote.bookmaker_id, quote.bookmaker_id
-                    ),
-                    sport=event.sport or "soccer",
-                    competition=event.competition or event.category or "",
-                    home_team=event.home_team or "",
-                    away_team=event.away_team or "",
-                    kickoff_time_utc=event.scheduled_start,
-                    market_type=MarketType(quote.market_type),
-                    selection=Selection(quote.selection),
-                    period=Period(quote.period),
-                    decimal_odds=quote.decimal_odds,
-                    implied_probability=decimal_odds_to_implied_probability(quote.decimal_odds),
-                    source_timestamp=quote.changed_at,
-                    received_timestamp=now,
-                    market_status=(
-                        MarketStatus.OPEN
-                        if quote.active and quote.market_active
-                        else MarketStatus.CLOSED
-                    ),
-                    direct_url=quote.direct_url,
-                )
-            )
-
     predictions: list[PredictionMarketQuote] = []
     order_books: dict[str, OrderBookSnapshot] = {}
     prediction_jobs: list[tuple[PredictionMarketConnector, ProviderEvent, ProviderEvent]] = []
@@ -1092,6 +1103,58 @@ async def collect_live_snapshot(
     market_results = await asyncio.gather(
         *(discover_prediction_markets(*job) for job in prediction_jobs)
     )
+    priceable_sportsbook_event_ids = {
+        matched.provider_event_id
+        for _connector, prediction_event, matched, markets in market_results
+        if any(prediction_selections(market, prediction_event) for market in markets)
+    }
+    priceable_sportsbook_events = [
+        event
+        for event in matched_sportsbook_events
+        if event.provider_event_id in priceable_sportsbook_event_ids
+    ]
+    logger.info(
+        "pricing.sportsbook.filtered matched_events=%d priceable_events=%d skipped=%d",
+        len(matched_sportsbook_events),
+        len(priceable_sportsbook_events),
+        len(matched_sportsbook_events) - len(priceable_sportsbook_events),
+    )
+    odds_results = await asyncio.gather(
+        *(fetch_event_odds(event) for event in priceable_sportsbook_events)
+    )
+    for event, event_odds in odds_results:
+        event_id = canonical_event_id(event)
+        for quote in event_odds:
+            if quote.bookmaker_id not in settings.enabled_bookmakers:
+                continue
+            sportsbooks.append(
+                SportsbookQuote(
+                    provider_event_id=event.provider_event_id,
+                    canonical_event_id=event_id,
+                    bookmaker_id=quote.bookmaker_id,
+                    bookmaker_display_name=CANONICAL_BOOKMAKERS.get(
+                        quote.bookmaker_id, quote.bookmaker_id
+                    ),
+                    sport=event.sport or "soccer",
+                    competition=event.competition or event.category or "",
+                    home_team=event.home_team or "",
+                    away_team=event.away_team or "",
+                    kickoff_time_utc=event.scheduled_start,
+                    market_type=MarketType(quote.market_type),
+                    selection=Selection(quote.selection),
+                    period=Period(quote.period),
+                    decimal_odds=quote.decimal_odds,
+                    implied_probability=decimal_odds_to_implied_probability(quote.decimal_odds),
+                    source_timestamp=quote.changed_at,
+                    received_timestamp=now,
+                    market_status=(
+                        MarketStatus.OPEN
+                        if quote.active and quote.market_active
+                        else MarketStatus.CLOSED
+                    ),
+                    direct_url=quote.direct_url,
+                )
+            )
     trade_tasks: dict[
         tuple[Provider, str],
         asyncio.Task[list[ProviderTrade]],

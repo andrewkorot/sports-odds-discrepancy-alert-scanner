@@ -75,6 +75,7 @@ async def test_kalshi_discovers_only_soccer_game_series_and_extracts_participant
                 },
             )
         assert request.url.path.endswith("/events")
+        assert request.url.params["with_milestones"] == "true"
         return httpx.Response(
             200,
             json={
@@ -117,6 +118,17 @@ async def test_kalshi_discovers_only_soccer_game_series_and_extracts_participant
                         "markets": [],
                     },
                 ],
+                "milestones": [
+                    {
+                        "id": "mls-game",
+                        "category": "Sports",
+                        "type": "soccer_game",
+                        "title": "Atlanta United vs Inter Miami CF",
+                        "start_date": "2026-07-30T17:00:00Z",
+                        "primary_event_tickers": ["KXMLSGAME-26JUL30ATLIM"],
+                        "related_event_tickers": ["KXMLSGAME-26JUL30ATLIM"],
+                    }
+                ],
                 "cursor": "",
             },
         )
@@ -136,7 +148,7 @@ async def test_kalshi_discovers_only_soccer_game_series_and_extracts_participant
     assert events[0].home_team == "Atlanta United"
     assert events[0].away_team == "Inter Miami CF"
     assert events[0].competition == "MLS"
-    assert events[0].scheduled_start == datetime(2026, 7, 30, 20, tzinfo=UTC)
+    assert events[0].scheduled_start == datetime(2026, 7, 30, 17, tzinfo=UTC)
     await client.aclose()
 
 

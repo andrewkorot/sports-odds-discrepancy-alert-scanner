@@ -71,7 +71,7 @@ Every variable is also present in `.env.example`.
 | `TELEGRAM_CHAT_ID` | Optional Telegram destination |
 | `ENABLED_SPORTS` | Comma-separated canonical sports; currently `soccer` |
 | `ENABLED_BOOKMAKERS` | Six comma-separated canonical IDs |
-| `CLIENT_TIMEZONE` | Calendar-day timezone (`America/New_York`) |
+| `CLIENT_TIMEZONE` | Calendar-day timezone (`America/Los_Angeles`) |
 | `ENABLED_MARKET_TYPES` | `moneyline,total,spread,btts` |
 | `MAX_BID_ASK_SPREAD_CENTS` | Strict spread ceiling (`5`) |
 | `DEPTH_WINDOW_FROM_MIDPOINT_CENTS` | Two-sided depth window (`3`) |

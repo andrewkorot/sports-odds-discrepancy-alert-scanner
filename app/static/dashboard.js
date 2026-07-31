@@ -1,3 +1,4 @@
+const DISPLAY_TIME_ZONE = "America/Los_Angeles";
 const state = { health: null, providers: [], events: [], eventMatches: [], bookmakers: [], opportunities: [], candidates: [], markets: [], settings: {}, matchedPage: 1, matchedPageSize: 8, unmatchedPage: 1, unmatchedPageSize: 8, refreshTimer: null };
 
 const $ = (selector) => document.querySelector(selector);
@@ -8,12 +9,27 @@ const money = (value) => `$${Number(value ?? 0).toLocaleString(undefined, { maxi
 const pct = (value, digits = 1) => `${number(Number(value) * 100, digits)}%`;
 const title = (value) => String(value ?? "").replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
 const searchable = (...values) => values.flat(Infinity).filter(value => value != null).join(" ").toLocaleLowerCase();
+const dateTime = (value) => value ? new Date(value).toLocaleString([], {
+  timeZone: DISPLAY_TIME_ZONE,
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZoneName: "short"
+}) : "—";
+const timeOnly = (value) => value ? new Date(value).toLocaleTimeString([], {
+  timeZone: DISPLAY_TIME_ZONE,
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZoneName: "short"
+}) : "—";
 const age = (date) => {
   if (!date) return "Never";
   const seconds = Math.max(0, Math.round((Date.now() - new Date(date).getTime()) / 1000));
   if (seconds < 60) return `${seconds}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  return new Date(date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return timeOnly(date);
 };
 
 async function get(path) {
@@ -102,7 +118,7 @@ function renderMatchedEvents() {
         <div class="provider-logo">${esc(item.provider.slice(0, 2).toUpperCase())}</div>
         <div class="unmatched-event">
           <strong>${esc(item.title)}</strong>
-          <small>${title(item.provider)} · ${esc(item.competition || "Competition unknown")} · ${item.kickoff_time_utc ? new Date(item.kickoff_time_utc).toLocaleString([], {dateStyle:"medium", timeStyle:"short"}) : "Kickoff unknown"}</small>
+          <small>${title(item.provider)} · ${esc(item.competition || "Competition unknown")} · ${item.kickoff_time_utc ? dateTime(item.kickoff_time_utc) : "Kickoff unknown"}</small>
         </div>
         <div class="unmatched-event">
           <strong>${esc(item.sportsbook_title || `${item.sportsbook_home_team || "Unknown"} vs ${item.sportsbook_away_team || "Unknown"}`)}</strong>
@@ -122,7 +138,7 @@ function renderMatchedEvents() {
             ${auditField("Participant one", item.participant_one)}
             ${auditField("Participant two", item.participant_two)}
             ${auditField("Orientation known", item.orientation_known)}
-            ${auditField("Kickoff UTC", item.kickoff_time_utc)}
+            ${auditField("Kickoff Pacific", item.kickoff_time_utc ? dateTime(item.kickoff_time_utc) : null)}
           </section>
           <section>
             <p class="eyebrow">Matched OddsPapi fixture</p>
@@ -131,7 +147,7 @@ function renderMatchedEvents() {
             ${auditField("Home team", item.sportsbook_home_team)}
             ${auditField("Away team", item.sportsbook_away_team)}
             ${auditField("Competition", item.sportsbook_competition)}
-            ${auditField("Kickoff UTC", item.sportsbook_kickoff_time_utc)}
+            ${auditField("Kickoff Pacific", item.sportsbook_kickoff_time_utc ? dateTime(item.sportsbook_kickoff_time_utc) : null)}
             ${auditField("Confidence", item.match_confidence)}
             ${auditField("Weighted score", item.weighted_score)}
           </section>
@@ -181,7 +197,7 @@ function renderUnmatchedEvents() {
         <div class="provider-logo">${esc(item.provider.slice(0, 2).toUpperCase())}</div>
         <div class="unmatched-event">
           <strong>${esc(item.home_team && item.away_team ? `${item.home_team} vs ${item.away_team}` : item.title)}</strong>
-          <small>${title(item.provider)} · ${esc(item.competition || "Competition unknown")} · ${item.kickoff_time_utc ? new Date(item.kickoff_time_utc).toLocaleString([], {dateStyle:"medium", timeStyle:"short"}) : "Kickoff unknown"}</small>
+          <small>${title(item.provider)} · ${esc(item.competition || "Competition unknown")} · ${item.kickoff_time_utc ? dateTime(item.kickoff_time_utc) : "Kickoff unknown"}</small>
         </div>
         <div class="audit-reasons">${item.rejection_reasons.map(reason => `<span class="reason">${title(reason)}</span>`).join("")}</div>
         <span class="decision ${item.match_confidence === "manual_review" ? "review" : ""}">${title(item.match_confidence)}</span>
@@ -205,7 +221,7 @@ function renderUnmatchedEvents() {
             ${auditField("Normalized participant two", item.normalized_participant_two)}
             ${auditField("Orientation known", item.orientation_known)}
             ${auditField("Extraction source", item.extraction_source)}
-            ${auditField("Kickoff UTC", item.kickoff_time_utc)}
+            ${auditField("Kickoff Pacific", item.kickoff_time_utc ? dateTime(item.kickoff_time_utc) : null)}
           </section>
           <section>
             <p class="eyebrow">Closest OddsPapi candidate</p>
@@ -214,7 +230,7 @@ function renderUnmatchedEvents() {
             ${auditField("Competition", item.sportsbook_competition)}
             ${auditField("Home team", item.sportsbook_home_team)}
             ${auditField("Away team", item.sportsbook_away_team)}
-            ${auditField("Kickoff UTC", item.sportsbook_kickoff_time_utc)}
+            ${auditField("Kickoff Pacific", item.sportsbook_kickoff_time_utc ? dateTime(item.sportsbook_kickoff_time_utc) : null)}
             ${auditField("Match confidence", item.match_confidence)}
             ${auditField("Weighted score", item.weighted_score)}
             ${auditField("Runner-up score", item.runner_up_score)}
@@ -286,7 +302,7 @@ function selectionLabel(o) {
 
 function opportunityCard(o) {
   return `<article class="opportunity-card">
-    <div class="card-top"><div><div class="match-name">${esc(o.home_team)} <span class="muted">vs</span> ${esc(o.away_team)}</div><div class="competition">${esc(o.competition)} · ${new Date(o.kickoff_time_utc).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</div></div>
+    <div class="card-top"><div><div class="match-name">${esc(o.home_team)} <span class="muted">vs</span> ${esc(o.away_team)}</div><div class="competition">${esc(o.competition)} · ${timeOnly(o.kickoff_time_utc)}</div></div>
     <div class="edge-value">+${number(o.edge_percentage_points, 2)}<small>percentage points</small></div></div>
     <div class="market-line"><span class="badge">${title(o.sport)}</span><span class="badge">${title(o.market_type)}</span><span class="badge">${esc(selectionLabel(o))}</span><span class="badge provider">${title(o.prediction_market_provider)}</span></div>
     <div class="price-route"><div class="venue"><small>Executable ask</small><strong>${pct(o.prediction_market_best_ask)}</strong></div><span class="arrow">→</span><div class="venue right"><small>${esc(o.bookmaker_display_name)}</small><strong>${number(o.sportsbook_decimal_odds, 2)}</strong></div></div>

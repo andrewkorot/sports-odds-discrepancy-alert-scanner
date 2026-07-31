@@ -1,4 +1,5 @@
 const PAGE_SIZE = 20;
+const DISPLAY_TIME_ZONE = "America/Los_Angeles";
 const state = {
   health: null,
   opportunities: [],
@@ -12,7 +13,15 @@ const esc = value => String(value ?? "—").replace(/[&<>"']/g, character => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 })[character]);
 const label = value => String(value ?? "—").replaceAll("_", " ");
-const kickoff = value => value ? new Date(value).toLocaleString() : "—";
+const kickoff = value => value ? new Date(value).toLocaleString([], {
+  timeZone: DISPLAY_TIME_ZONE,
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZoneName: "short"
+}) : "—";
 const percent = value => `${(Number(value) * 100).toFixed(1)}%`;
 const normalized = value => String(value ?? "").toLowerCase();
 
@@ -143,7 +152,7 @@ async function refresh(forceSnapshot = false) {
     }
     $("#status").textContent = health.scan_in_progress
       ? "Scanning now — showing the previous completed scan."
-      : health.last_scan_error || `Last completed update: ${health.last_successful_update ? new Date(health.last_successful_update).toLocaleString() : "none"}`;
+      : health.last_scan_error || `Last completed update: ${health.last_successful_update ? kickoff(health.last_successful_update) : "none"}`;
   } catch (error) {
     $("#status").textContent = `Dashboard refresh failed: ${error.message}`;
   } finally {

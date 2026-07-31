@@ -87,6 +87,9 @@ class FakePredictionConnector:
 
 
 class FakeSportsConnector:
+    def __init__(self) -> None:
+        self.odds_requests = 0
+
     def use_provider_bookmaker_ids(
         self, mapped: list[Bookmaker], enabled_canonical_ids: list[str]
     ) -> None:
@@ -121,6 +124,7 @@ class FakeSportsConnector:
         ], []
 
     async def get_event_odds(self, event_id: str) -> list[ProviderSportsbookQuote]:
+        self.odds_requests += 1
         return [
             ProviderSportsbookQuote(
                 provider_event_id=event_id,
@@ -166,6 +170,11 @@ class RenamedPredictionConnector(FakePredictionConnector):
         return await super().discover_markets(event_id)
 
 
+class NoEligibleMarketsPredictionConnector(FakePredictionConnector):
+    async def discover_markets(self, event_id: str) -> list[ProviderMarket]:
+        return []
+
+
 class UnorderedPredictionConnector(FakePredictionConnector):
     async def discover_events(
         self, start_time: datetime, end_time: datetime
@@ -208,7 +217,21 @@ class MultiEventPredictionConnector(FakePredictionConnector):
         ]
 
     async def discover_markets(self, event_id: str) -> list[ProviderMarket]:
-        return []
+        index = event_id.rsplit("-", 1)[-1]
+        return [
+            ProviderMarket(
+                provider=Provider.KALSHI,
+                provider_event_id=event_id,
+                provider_market_id=f"market-{index}",
+                title=f"Will Home {index} win?",
+                status="open",
+                order_book_enabled=True,
+                outcomes=[
+                    ProviderOutcome(name="Yes", selection_id="yes"),
+                    ProviderOutcome(name="No", selection_id="no"),
+                ],
+            )
+        ]
 
 
 class ConcurrentSportsConnector(FakeSportsConnector):
@@ -333,7 +356,7 @@ async def test_approved_team_alias_can_flow_into_automatic_matching() -> None:
     assert snapshot.opportunities
 
 
-async def test_fuzzy_event_is_manual_review_and_never_prices_markets() -> None:
+async def test_fuzzy_event_above_threshold_is_approved_and_priced() -> None:
     now = datetime(2026, 7, 30, 16, tzinfo=UTC)
     connector = RenamedPredictionConnector("Inter Miamii vs Atlanta United")
     snapshot = await collect_live_snapshot(
@@ -348,16 +371,38 @@ async def test_fuzzy_event_is_manual_review_and_never_prices_markets() -> None:
     prediction_audit = next(
         item for item in snapshot.event_matches if item.provider == Provider.KALSHI
     )
-    assert not prediction_audit.matched
-    assert prediction_audit.match_confidence == MatchConfidence.MANUAL_REVIEW
-    assert "fuzzy_match_requires_manual_review" in prediction_audit.rejection_reasons
+    assert prediction_audit.matched
+    assert prediction_audit.match_confidence == MatchConfidence.APPROVED_ALIAS
+    assert prediction_audit.rejection_reasons == []
     assert prediction_audit.normalized_participant_one == "inter miamii"
     assert prediction_audit.sportsbook_home_team == "Inter Miami"
     assert prediction_audit.sportsbook_away_team == "Atlanta United"
     assert prediction_audit.sportsbook_kickoff_time_utc == datetime(2026, 7, 30, 20, tzinfo=UTC)
-    assert snapshot.predictions == []
+    assert snapshot.predictions
+    assert snapshot.opportunities
+    assert connector.market_requests == 1
+
+
+async def test_odds_are_not_requested_without_an_eligible_prediction_market() -> None:
+    now = datetime(2026, 7, 30, 16, tzinfo=UTC)
+    sports = FakeSportsConnector()
+
+    snapshot = await collect_live_snapshot(
+        [NoEligibleMarketsPredictionConnector()],
+        sports,  # type: ignore[arg-type]
+        Settings(enabled_bookmakers=["pinnacle"], edge_threshold_pp=Decimal("3")),
+        now,
+        now,
+        now + timedelta(hours=8),
+    )
+
+    prediction_audit = next(
+        item for item in snapshot.event_matches if item.provider == Provider.KALSHI
+    )
+    assert prediction_audit.matched
+    assert sports.odds_requests == 0
+    assert snapshot.sportsbooks == []
     assert snapshot.opportunities == []
-    assert connector.market_requests == 0
 
 
 async def test_unordered_kalshi_pair_adopts_unique_sportsbook_orientation() -> None:

@@ -81,6 +81,13 @@ class KalshiMarketPayload(BaseModel):
     volume_24h_fp: Decimal | None = None
 
 
+class KalshiMilestonePayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    start_date: datetime
+    primary_event_tickers: list[str] = Field(default_factory=list)
+    related_event_tickers: list[str] = Field(default_factory=list)
+
+
 class KalshiTradePayload(BaseModel):
     trade_id: str
     ticker: str
@@ -162,12 +169,23 @@ class KalshiConnector:
                     {
                         "status": "open",
                         "with_nested_markets": "true",
+                        "with_milestones": "true",
                         "min_close_ts": int(start_time.timestamp()),
                         "limit": 200,
                         **({"cursor": cursor} if cursor else {}),
                     },
                 ),
             )
+            milestone_start_by_event: dict[str, datetime] = {}
+            for raw_milestone in payload.get("milestones", []):
+                milestone = KalshiMilestonePayload.model_validate(raw_milestone)
+                for event_ticker in {
+                    *milestone.primary_event_tickers,
+                    *milestone.related_event_tickers,
+                }:
+                    existing = milestone_start_by_event.get(event_ticker)
+                    if existing is None or milestone.start_date < existing:
+                        milestone_start_by_event[event_ticker] = milestone.start_date
             # print(f"Discovered events: {len(payload.get('events', []))}")
             for raw in payload.get("events", []):
                 event = KalshiEventPayload.model_validate(raw)
@@ -179,7 +197,9 @@ class KalshiConnector:
                     for market in markets
                     if market.occurrence_datetime is not None
                 ]
-                scheduled = min(occurrence_times) if occurrence_times else event.strike_date
+                scheduled = milestone_start_by_event.get(event.event_ticker)
+                if scheduled is None:
+                    scheduled = min(occurrence_times) if occurrence_times else event.strike_date
                 if scheduled is None or not start_time <= scheduled <= end_time:
                     continue
                 extracted = self.extract_participants(event, markets)

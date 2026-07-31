@@ -60,7 +60,7 @@ class Settings(BaseSettings):
             "coolbet",
         ]
     )
-    client_timezone: str = "America/New_York"
+    client_timezone: str = "America/Los_Angeles"
     enabled_market_types: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["moneyline", "total", "spread", "btts"]
     )
