@@ -131,7 +131,7 @@ class FakeSportsConnector:
                 bookmaker_id="pinnacle",
                 provider_outcome_id=101,
                 market_id=101,
-                decimal_odds=Decimal("1.75"),
+                decimal_odds=Decimal("2.15"),
                 active=True,
                 market_active=True,
                 main_line=True,

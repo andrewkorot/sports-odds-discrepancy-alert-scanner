@@ -40,6 +40,7 @@ def test_telegram_formatting() -> None:
         predictions,
         sportsbooks,
         "America/Los_Angeles",
+        Decimal("4.5"),
     )
     assert "SOCCER PRICE DISCREPANCY" in message
     assert "Executable YES ask" in message
@@ -48,3 +49,4 @@ def test_telegram_formatting() -> None:
     assert item.bookmaker_display_name in message
     assert " PST" in message
     assert " UTC" not in message
+    assert "Depth within 4.5 cents of midpoint" in message

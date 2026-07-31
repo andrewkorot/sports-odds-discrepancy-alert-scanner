@@ -110,6 +110,8 @@ def evaluate_candidates(
             edge = calculate_edge_percentage_points(
                 prediction.best_ask_probability, sportsbook.implied_probability
             )
+            if prediction.best_ask_probability <= sportsbook.implied_probability:
+                reasons.append("prediction_probability_not_higher")
             if edge < settings.edge_threshold_pp:
                 reasons.append("edge_below_threshold")
             reasons = list(dict.fromkeys(reasons))

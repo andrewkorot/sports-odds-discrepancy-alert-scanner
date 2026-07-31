@@ -102,8 +102,9 @@ def mock_snapshot(
     ]
     sportsbook_quotes: list[SportsbookQuote] = []
     for market_type, selection, participant, line, ask in SELECTIONS:
-        # A 4pp higher sportsbook probability guarantees a qualifying ask-based edge.
-        target_probability = ask + Decimal("0.04")
+        # A 4pp lower sportsbook probability guarantees a qualifying
+        # prediction-ask-minus-sportsbook edge.
+        target_probability = ask - Decimal("0.04")
         odds = Decimal("1") / target_probability
         for canonical_id, (display_name, _) in BOOKMAKERS.items():
             sportsbook_quotes.append(

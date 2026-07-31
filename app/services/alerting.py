@@ -82,14 +82,15 @@ class AlertCoordinator:
         for opportunity in best_by_market.values():
             if await self.deduplicator.should_alert(
                 opportunity,
-                timedelta(seconds=self.settings.alert_dedupe_ttl_seconds),
-                self.settings.alert_edge_change_threshold * 100,
+                timedelta(minutes=self.settings.alert_cooldown_minutes),
+                self.settings.realert_edge_increase_pp,
             ):
                 message = format_telegram_alert(
                     opportunity,
                     self.scanner.predictions,
                     self.scanner.sportsbooks,
                     self.settings.client_timezone,
+                    self.settings.depth_window_from_midpoint_cents,
                 )
                 try:
                     await self.sender.send(message)

@@ -17,6 +17,7 @@ from app.providers.kalshi.connector import (
 from app.providers.oddspapi.connector import (
     OddsPapiHTTPError,
     SportsOddsConnector,
+    bookmaker_outcome_agrees,
     sanitized_error,
 )
 from app.providers.polymarket.connector import GammaEventPayload, PolymarketConnector
@@ -377,6 +378,14 @@ def test_oddspapi_error_sanitization_does_not_include_request_url() -> None:
     message = sanitized_error(error)
     assert message == "OddsPapi HTTP 401"
     assert "do-not-print" not in message
+
+
+def test_oddspapi_recognizable_bookmaker_outcome_must_agree_with_catalog() -> None:
+    assert bookmaker_outcome_agrees("away", "away")
+    assert bookmaker_outcome_agrees("away", "2")
+    assert bookmaker_outcome_agrees("away", "opaque-bookmaker-id")
+    assert not bookmaker_outcome_agrees("away", "home")
+    assert not bookmaker_outcome_agrees("away", "1")
 
 
 @pytest.mark.asyncio

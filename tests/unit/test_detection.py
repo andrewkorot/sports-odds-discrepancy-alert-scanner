@@ -5,7 +5,7 @@ from app.core.config import Settings
 from app.domain.enums import AvailabilityStatus, MarketStatus
 from app.domain.models import Opportunity
 from app.providers.mock.data import mock_snapshot
-from app.services.opportunity_detector import detect_opportunities
+from app.services.opportunity_detector import detect_opportunities, evaluate_candidates
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -31,14 +31,84 @@ def detected(
 
 def test_threshold_boundary_exactly_three_qualifies() -> None:
     _, predictions, sportsbooks, books = mock_snapshot(NOW)
+    ask = sportsbooks[0].implied_probability + Decimal("0.03")
     prediction = predictions[0].model_copy(
-        update={"best_ask_probability": sportsbooks[0].implied_probability - Decimal("0.03")}
+        update={
+            "best_bid_probability": ask - Decimal("0.01"),
+            "best_ask_probability": ask,
+        }
     )
     result = detect_opportunities(
         [prediction], [sportsbooks[0]], [books[0]], Settings(edge_threshold_pp=Decimal("3")), NOW
     )
     assert len(result) == 1
     assert result[0].edge_percentage_points == Decimal("3")
+
+
+def test_wrong_direction_is_explicitly_rejected() -> None:
+    _, predictions, sportsbooks, books = mock_snapshot(NOW)
+    prediction = predictions[0].model_copy(update={"best_ask_probability": Decimal("0.60")})
+    sportsbook = sportsbooks[0].model_copy(
+        update={
+            "decimal_odds": Decimal("1.56"),
+            "implied_probability": Decimal("1") / Decimal("1.56"),
+        }
+    )
+
+    candidates = evaluate_candidates(
+        [prediction],
+        [sportsbook],
+        [books[0]],
+        Settings(edge_threshold_pp=Decimal("3")),
+        NOW,
+    )
+
+    assert not candidates[0].accepted
+    assert "prediction_probability_not_higher" in candidates[0].rejection_reasons
+    assert candidates[0].edge_percentage_points.quantize(Decimal("0.01")) == Decimal("-4.10")
+
+
+def test_client_alert_example_selects_pinnacle_and_rejects_stake() -> None:
+    _, predictions, sportsbooks, books = mock_snapshot(NOW)
+    prediction = predictions[0].model_copy(
+        update={
+            "best_bid_probability": Decimal("0.59"),
+            "best_ask_probability": Decimal("0.60"),
+        }
+    )
+    same_selection = [
+        quote
+        for quote in sportsbooks
+        if quote.market_type == prediction.market_type
+        and quote.selection == prediction.selection
+        and quote.line == prediction.line
+        and quote.participant == prediction.participant
+    ]
+    stake = next(quote for quote in same_selection if quote.bookmaker_id == "stake").model_copy(
+        update={
+            "decimal_odds": Decimal("1.56"),
+            "implied_probability": Decimal("1") / Decimal("1.56"),
+        }
+    )
+    pinnacle = next(
+        quote for quote in same_selection if quote.bookmaker_id == "pinnacle"
+    ).model_copy(
+        update={
+            "decimal_odds": Decimal("3.03"),
+            "implied_probability": Decimal("1") / Decimal("3.03"),
+        }
+    )
+
+    results = detect_opportunities(
+        [prediction],
+        [stake, pinnacle],
+        books,
+        Settings(edge_threshold_pp=Decimal("3")),
+        NOW,
+    )
+
+    assert [result.bookmaker_id for result in results] == ["pinnacle"]
+    assert results[0].edge_percentage_points.quantize(Decimal("0.01")) == Decimal("27.00")
 
 
 def test_edge_below_threshold() -> None:

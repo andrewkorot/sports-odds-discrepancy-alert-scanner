@@ -91,8 +91,6 @@ Every variable is also present in `.env.example`.
 | `EVENT_MATCH_KICKOFF_TOLERANCE_MINUTES` | Cross-provider kickoff tolerance. controls the maximum kickoff-time difference allowed when determining whether two providers refer to the same event. (`15`) |
 | `EVENT_MATCH_FUZZY_MIN_SCORE` | Minimum weighted score for a manual-review candidate (`80`) |
 | `EVENT_MATCH_AMBIGUITY_MARGIN` | Minimum lead over the runner-up candidate (`5`) |
-| `ALERT_DEDUPE_TTL_SECONDS` | Unchanged-alert suppression (`900`) |
-| `ALERT_EDGE_CHANGE_THRESHOLD` | Material edge change as probability (`0.01`) |
 
 Secrets are never returned by `/settings` or printed by commands.
 
@@ -206,10 +204,8 @@ POLYMARKET_MODE=live
 SPORTS_ODDS_MODE=live
 ```
 
-A failed provider updates only its own sanitized health record. REST polling is
-the supported live synchronization path. WebSocket flags default to false;
-sequence-aware snapshot recovery is not yet implemented, so WebSocket
-availability never blocks REST mode.
+A failed provider updates only its own sanitized health record. This project
+uses REST polling exclusively for Kalshi, Polymarket, and OddsPapi.
 
 The application scans whole calendar days in `CLIENT_TIMEZONE`, beginning at
 today's local midnight. `DISCOVERY_CALENDAR_DAYS=1` scans today only, `2`

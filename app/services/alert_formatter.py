@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from decimal import Decimal
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -12,8 +13,11 @@ def format_telegram_alert(
     predictions: Sequence[PredictionMarketQuote],
     sportsbooks: Sequence[SportsbookQuote],
     client_timezone: str = "America/Los_Angeles",
+    depth_window_from_midpoint_cents: Decimal = Decimal("3"),
 ) -> str:
     localized_kickoff = best.kickoff_time_utc.astimezone(ZoneInfo(client_timezone))
+    depth_window_label = f"{depth_window_from_midpoint_cents:g}"
+    depth_window_unit = "cent" if depth_window_from_midpoint_cents == Decimal("1") else "cents"
     matching_predictions = [
         quote
         for quote in predictions
@@ -76,7 +80,7 @@ def format_telegram_alert(
         f"Threshold: {best.configured_threshold:.2f}% PASSED\n\n"
         "MARKET QUALITY\n\n"
         f"Spread: {best.spread_cents:.1f} cents — PASSED\n"
-        f"Depth within 3 cents of midpoint: "
+        f"Depth within {depth_window_label} {depth_window_unit} of midpoint: "
         f"${best.total_depth_within_window_usd:,.0f} — PASSED\n"
         f"Trailing 24-hour volume: ${best.trailing_24h_volume_usd:,.0f} — PASSED\n"
         "Game date: Today — PASSED\n\n"

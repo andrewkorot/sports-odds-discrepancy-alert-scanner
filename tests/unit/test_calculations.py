@@ -20,7 +20,21 @@ def test_decimal_odds_conversion_and_precision() -> None:
 def test_ask_based_edge_is_percentage_points() -> None:
     implied = decimal_odds_to_implied_probability(Decimal("2.15"))
     edge = calculate_edge_percentage_points(Decimal("0.52"), implied)
-    assert edge.quantize(Decimal("0.0001")) == Decimal("-5.4884")
+    assert edge.quantize(Decimal("0.0001")) == Decimal("5.4884")
+
+
+def test_client_example_rejects_sportsbook_probability_above_prediction_ask() -> None:
+    implied = decimal_odds_to_implied_probability(Decimal("1.56"))
+    edge = calculate_edge_percentage_points(Decimal("0.60"), implied)
+    assert implied.quantize(Decimal("0.0001")) == Decimal("0.6410")
+    assert edge.quantize(Decimal("0.01")) == Decimal("-4.10")
+
+
+def test_client_example_accepts_better_sportsbook_price() -> None:
+    implied = decimal_odds_to_implied_probability(Decimal("1.78"))
+    edge = calculate_edge_percentage_points(Decimal("0.60"), implied)
+    assert implied.quantize(Decimal("0.0001")) == Decimal("0.5618")
+    assert edge.quantize(Decimal("0.01")) == Decimal("3.82")
 
 
 def test_kalshi_derived_ask_and_size() -> None:

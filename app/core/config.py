@@ -27,16 +27,11 @@ class Settings(BaseSettings):
     kalshi_api_key: str | None = None  # Backward-compatible alias.
     kalshi_private_key_path: str | None = None
     kalshi_mode: str = "mock"
-    kalshi_rest_enabled: bool = True
-    kalshi_ws_enabled: bool = False
     kalshi_base_url: str = "https://external-api.kalshi.com/trade-api/v2"
-    kalshi_ws_url: str = "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
     polymarket_mode: str = "mock"
     polymarket_gamma_base_url: str = "https://gamma-api.polymarket.com"
     polymarket_clob_base_url: str = "https://clob.polymarket.com"
     polymarket_data_base_url: str = "https://data-api.polymarket.com"
-    polymarket_ws_enabled: bool = False
-    polymarket_ws_url: str = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
     sports_odds_mode: str = "mock"
     live_dry_run: bool = True
     alerts_enabled: bool = False
@@ -46,8 +41,6 @@ class Settings(BaseSettings):
     event_match_kickoff_tolerance_minutes: int = 15
     event_match_fuzzy_min_score: Decimal = Decimal("80")
     event_match_ambiguity_margin: Decimal = Decimal("5")
-    alert_dedupe_ttl_seconds: int = 900
-    alert_edge_change_threshold: Decimal = Decimal("0.01")
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     enabled_bookmakers: Annotated[list[str], NoDecode] = Field(

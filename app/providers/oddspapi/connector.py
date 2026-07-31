@@ -26,6 +26,25 @@ from app.providers.records import (
 
 SPORT_ID_SOCCER = 10
 logger = logging.getLogger("uvicorn.error")
+_MONEYLINE_OUTCOME_ALIASES = {
+    "home": {"1", "home"},
+    "draw": {"x", "draw", "tie"},
+    "away": {"2", "away"},
+}
+
+
+def bookmaker_outcome_agrees(selection: str, bookmaker_outcome_id: str | None) -> bool:
+    """Reject a recognizable bookmaker side that conflicts with catalog semantics.
+
+    Opaque bookmaker IDs remain valid because the OddsPapi market/outcome catalog
+    is authoritative. Only explicit home/draw/away labels can prove a conflict.
+    """
+
+    if bookmaker_outcome_id is None:
+        return True
+    normalized = bookmaker_outcome_id.strip().casefold()
+    recognized = set().union(*_MONEYLINE_OUTCOME_ALIASES.values())
+    return normalized not in recognized or normalized in _MONEYLINE_OUTCOME_ALIASES[selection]
 
 
 class OddsPapiHTTPError(RuntimeError):
@@ -277,16 +296,28 @@ class SportsOddsConnector:
                     market_type, selection, period = semantics
                     players = cast(dict[str, dict[str, Any]], outcome.get("players", {}))
                     for raw in players.values():
+                        bookmaker_outcome_id = (
+                            str(raw["bookmakerOutcomeId"])
+                            if raw.get("bookmakerOutcomeId") is not None
+                            else None
+                        )
+                        if not bookmaker_outcome_agrees(selection, bookmaker_outcome_id):
+                            logger.warning(
+                                "oddspapi.outcome_semantics.rejected event_id=%s "
+                                "bookmaker=%s market_id=%s outcome_id=%s selection=%s",
+                                event_id,
+                                bookmaker,
+                                market_id,
+                                outcome_id,
+                                selection,
+                            )
+                            continue
                         records.append(
                             ProviderSportsbookQuote(
                                 provider_event_id=event_id,
                                 bookmaker_id=bookmaker,
                                 provider_outcome_id=int(outcome_id),
-                                bookmaker_outcome_id=(
-                                    str(raw["bookmakerOutcomeId"])
-                                    if raw.get("bookmakerOutcomeId") is not None
-                                    else None
-                                ),
+                                bookmaker_outcome_id=bookmaker_outcome_id,
                                 market_id=int(market_id),
                                 decimal_odds=Decimal(str(raw["price"])),
                                 active=bool(raw["active"]),
