@@ -39,7 +39,7 @@ services:
       KALSHI_BASE_URL: ${KALSHI_BASE_URL:-https://external-api.kalshi.com/trade-api/v2}
       KALSHI_WS_URL: ${KALSHI_WS_URL:-wss://external-api-ws.kalshi.com/trade-api/ws/v2}
       KALSHI_API_KEY_ID: ${KALSHI_API_KEY_ID:-}
-      KALSHI_PRIVATE_KEY_PATH: ${KALSHI_PRIVATE_KEY_PATH:-}
+      KALSHI_PRIVATE_KEY_PATH: /run/secrets/kalshi_private_key.pem
       POLYMARKET_MODE: ${POLYMARKET_MODE:-mock}
       POLYMARKET_GAMMA_BASE_URL: ${POLYMARKET_GAMMA_BASE_URL:-https://gamma-api.polymarket.com}
       POLYMARKET_CLOB_BASE_URL: ${POLYMARKET_CLOB_BASE_URL:-https://clob.polymarket.com}
@@ -60,8 +60,9 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
     ports: ["8000:8000"]
+    volumes:
+      - ${KALSHI_PRIVATE_KEY_HOST_PATH:-./kalshi_private_key.pem}:/run/secrets/kalshi_private_key.pem:ro
 
 volumes:
   postgres_data:
   redis_data:
-  - ./kalshi_private_key.pem:/app/kalshi_private_key.pem:ro
