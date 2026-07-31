@@ -26,6 +26,8 @@ services:
 
   api:
     build: .
+    env_file:
+      - .env
     environment:
       APP_ENV: ${APP_ENV:-development}
       DASHBOARD_UI: ${DASHBOARD_UI:-simple}
