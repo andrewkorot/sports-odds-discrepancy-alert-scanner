@@ -172,7 +172,7 @@ async def settings(request: Request) -> dict[str, object]:
         "min_kalshi_ask_size": current.min_kalshi_ask_size,
         "min_polymarket_ask_size": current.min_polymarket_ask_size,
         "min_minutes_before_kickoff": current.min_minutes_before_kickoff,
-        "max_hours_before_kickoff": current.max_hours_before_kickoff,
+        "discovery_calendar_days": current.discovery_calendar_days,
         "alert_cooldown_minutes": current.alert_cooldown_minutes,
         "realert_edge_increase_pp": current.realert_edge_increase_pp,
         "app_mode": current.app_mode,

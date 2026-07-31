@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     min_kalshi_ask_size: Decimal = Decimal("100")
     min_polymarket_ask_size: Decimal = Decimal("100")
     min_minutes_before_kickoff: int = 10
-    max_hours_before_kickoff: int = 72
+    discovery_calendar_days: int = Field(default=3, ge=1)
     alert_cooldown_minutes: int = 10
     realert_edge_increase_pp: Decimal = Decimal("1.0")
 

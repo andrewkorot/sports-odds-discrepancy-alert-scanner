@@ -200,7 +200,7 @@ class KalshiConnector:
                 scheduled = milestone_start_by_event.get(event.event_ticker)
                 if scheduled is None:
                     scheduled = min(occurrence_times) if occurrence_times else event.strike_date
-                if scheduled is None or not start_time <= scheduled <= end_time:
+                if scheduled is None or not start_time <= scheduled < end_time:
                     continue
                 extracted = self.extract_participants(event, markets)
                 if extracted is None:

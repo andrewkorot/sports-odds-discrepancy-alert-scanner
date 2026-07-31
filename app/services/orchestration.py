@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import suppress
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from time import perf_counter
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -201,8 +202,16 @@ class ScanOrchestrator:
         return f"Live scan failed: {type(exc).__name__}"
 
     def _discovery_window(self) -> tuple[datetime, datetime]:
-        now = self.scanner.clock.now().astimezone(UTC)
-        return now, now + timedelta(hours=self.settings.max_hours_before_kickoff)
+        client_zone = ZoneInfo(self.settings.client_timezone)
+        local_date = self.scanner.clock.now().astimezone(client_zone).date()
+        local_start = datetime.combine(local_date, time.min, tzinfo=client_zone)
+        discovery_days = self.settings.discovery_calendar_days
+        local_end = datetime.combine(
+            local_date + timedelta(days=discovery_days),
+            time.min,
+            tzinfo=client_zone,
+        )
+        return local_start.astimezone(UTC), local_end.astimezone(UTC)
 
     async def health(self) -> list[ProviderHealthRecord]:
         return list(self._health.values())

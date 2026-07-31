@@ -415,7 +415,7 @@ function renderHealth() {
 }
 
 function renderSettings() {
-  const keys = ["client_timezone","enabled_sports","edge_threshold_pp","max_bid_ask_spread_cents","depth_window_from_midpoint_cents","min_depth_within_window_usd","min_trailing_24h_volume_usd","price_poll_interval_seconds","enabled_market_types","live_dry_run","alerts_enabled","telegram_enabled"];
+  const keys = ["client_timezone","discovery_calendar_days","enabled_sports","edge_threshold_pp","max_bid_ask_spread_cents","depth_window_from_midpoint_cents","min_depth_within_window_usd","min_trailing_24h_volume_usd","price_poll_interval_seconds","enabled_market_types","live_dry_run","alerts_enabled","telegram_enabled"];
   $("#settingsGrid").innerHTML = keys.map(k => `<div class="setting"><small>${title(k)}</small><strong>${esc(Array.isArray(state.settings[k]) ? state.settings[k].map(title).join(", ") : state.settings[k])}</strong></div>`).join("");
 }
 

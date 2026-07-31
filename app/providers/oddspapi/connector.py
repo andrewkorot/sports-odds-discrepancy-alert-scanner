@@ -201,7 +201,11 @@ class SportsOddsConnector:
                 away_team=str(item["participant2Name"]),
             )
             for item in payload
-            if int(item["statusId"]) == 0 and str(item["sportName"]).casefold() == "soccer"
+            if int(item["statusId"]) == 0
+            and str(item["sportName"]).casefold() == "soccer"
+            and start_time
+            <= datetime.fromisoformat(str(item["startTime"]).replace("Z", "+00:00"))
+            < end_time
         ]
         self._health = self._health.model_copy(update={"events_discovered": len(records)})
         print(f"Discovered events from {self._base}: {len(records)}")

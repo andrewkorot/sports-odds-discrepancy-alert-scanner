@@ -82,13 +82,13 @@ Every variable is also present in `.env.example`.
 | `MAX_SPORTSBOOK_PRICE_AGE_SECONDS` | Sportsbook quote maximum age (`60`) |
 | `MIN_KALSHI_ASK_SIZE` | Minimum Kalshi executable contracts (`100`) |
 | `MIN_POLYMARKET_ASK_SIZE` | Minimum Polymarket executable size (`100`) |
-| `MIN_MINUTES_BEFORE_KICKOFF` | Earliest pregame boundary (`10`) |
-| `MAX_HOURS_BEFORE_KICKOFF` | Furthest pregame boundary (`72`) |
+| `MIN_MINUTES_BEFORE_KICKOFF` | Earliest pregame boundary. controls how close to kickoff an event can be before it stops qualifying as an opportunity. (`10`) |
+| `DISCOVERY_CALENDAR_DAYS` | Number of complete client-timezone calendar days to discover (`1` = today only) |
 | `ALERT_COOLDOWN_MINUTES` | Duplicate alert cooldown (`10`) |
 | `REALERT_EDGE_INCREASE_PP` | Early re-alert edge improvement (`1.0`) |
 | `PRICE_POLL_INTERVAL_SECONDS` | Recurring scan interval (`30`) |
 | `PROVIDER_REQUEST_CONCURRENCY` | Maximum simultaneous provider pricing requests (`8`) |
-| `EVENT_MATCH_KICKOFF_TOLERANCE_MINUTES` | Cross-provider kickoff tolerance (`15`) |
+| `EVENT_MATCH_KICKOFF_TOLERANCE_MINUTES` | Cross-provider kickoff tolerance. controls the maximum kickoff-time difference allowed when determining whether two providers refer to the same event. (`15`) |
 | `EVENT_MATCH_FUZZY_MIN_SCORE` | Minimum weighted score for a manual-review candidate (`80`) |
 | `EVENT_MATCH_AMBIGUITY_MARGIN` | Minimum lead over the runner-up candidate (`5`) |
 | `ALERT_DEDUPE_TTL_SECONDS` | Unchanged-alert suppression (`900`) |
@@ -211,8 +211,11 @@ the supported live synchronization path. WebSocket flags default to false;
 sequence-aware snapshot recovery is not yet implemented, so WebSocket
 availability never blocks REST mode.
 
-The application scans from the current UTC time through
-`MAX_HOURS_BEFORE_KICKOFF` (72 hours by default), once at startup and then every
+The application scans whole calendar days in `CLIENT_TIMEZONE`, beginning at
+today's local midnight. `DISCOVERY_CALENDAR_DAYS=1` scans today only, `2`
+scans today and tomorrow, and `3` scans three calendar days. The ending local
+midnight is exclusive. Provider boundaries are converted to UTC, including
+daylight-saving transitions. Scans run once at startup and then every
 `PRICE_POLL_INTERVAL_SECONDS`. Telegram is output-only and delivery occurs only
 when all three conditions are true:
 

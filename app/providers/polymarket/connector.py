@@ -178,7 +178,7 @@ class PolymarketConnector:
                     if str(tag.get("label", "")).strip()
                 ]
                 scheduled = self.fixture_start(event, eligible_markets)
-                if scheduled is None or not start_time <= scheduled <= end_time:
+                if scheduled is None or not start_time <= scheduled < end_time:
                     continue
                 home_team, away_team = self.ordered_teams(event)
                 if home_team is None or away_team is None:

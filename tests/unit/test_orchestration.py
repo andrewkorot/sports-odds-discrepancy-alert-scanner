@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from app.core.config import Settings
 from app.services.alert_formatter import MockTelegramSender
@@ -9,7 +9,13 @@ from app.services.scanner import ScannerState
 
 
 async def test_dry_run_never_delivers_telegram() -> None:
-    settings = Settings(live_dry_run=True, alerts_enabled=True, telegram_enabled=True)
+    settings = Settings(
+        app_mode="mock",
+        mock_mode=True,
+        live_dry_run=True,
+        alerts_enabled=True,
+        telegram_enabled=True,
+    )
     scanner = ScannerState(settings)
     await scanner.refresh()
     sender = MockTelegramSender()
@@ -20,6 +26,8 @@ async def test_dry_run_never_delivers_telegram() -> None:
 
 async def test_enabled_delivery_is_deduplicated() -> None:
     settings = Settings(
+        app_mode="mock",
+        mock_mode=True,
         live_dry_run=False,
         alerts_enabled=True,
         telegram_enabled=True,
@@ -44,7 +52,7 @@ async def test_enabled_delivery_is_deduplicated() -> None:
     assert await coordinator.process() == 0
 
 
-def test_discovery_window_uses_configured_maximum_hours() -> None:
+def test_discovery_window_uses_client_timezone_calendar_day() -> None:
     now = datetime(2026, 7, 30, 16, 45, tzinfo=UTC)
     settings = Settings(
         app_mode="mock",
@@ -52,12 +60,33 @@ def test_discovery_window_uses_configured_maximum_hours() -> None:
         kalshi_mode="mock",
         polymarket_mode="mock",
         sports_odds_mode="mock",
-        max_hours_before_kickoff=72,
+        client_timezone="America/Los_Angeles",
+        discovery_calendar_days=3,
     )
     scanner = ScannerState(settings, FrozenClock(now))
     orchestrator = ScanOrchestrator(settings, scanner)
 
     start, end = orchestrator._discovery_window()
 
-    assert start == now
-    assert end == now + timedelta(hours=72)
+    assert start == datetime(2026, 7, 30, 7, tzinfo=UTC)
+    assert end == datetime(2026, 8, 2, 7, tzinfo=UTC)
+
+
+def test_discovery_window_respects_pacific_daylight_saving_transition() -> None:
+    now = datetime(2026, 11, 1, 12, tzinfo=UTC)
+    settings = Settings(
+        app_mode="mock",
+        mock_mode=True,
+        kalshi_mode="mock",
+        polymarket_mode="mock",
+        sports_odds_mode="mock",
+        client_timezone="America/Los_Angeles",
+        discovery_calendar_days=1,
+    )
+    scanner = ScannerState(settings, FrozenClock(now))
+    orchestrator = ScanOrchestrator(settings, scanner)
+
+    start, end = orchestrator._discovery_window()
+
+    assert start == datetime(2026, 11, 1, 7, tzinfo=UTC)
+    assert end == datetime(2026, 11, 2, 8, tzinfo=UTC)
