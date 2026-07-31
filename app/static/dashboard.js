@@ -388,6 +388,40 @@ function renderOpportunityTable() {
   <td data-label="Edge" class="positive">+${number(o.edge_percentage_points,2)} pp</td><td data-label="Quality"><span class="cell-main">${number(o.spread_cents,1)}¢ spread</span><span class="cell-sub">${money(o.total_depth_within_window_usd)} depth</span></td></tr>`).join("")}</tbody></table>` : "";
 }
 
+function candidateFieldValue(key, value) {
+  if (value == null || value === "") return null;
+  if (Array.isArray(value) || typeof value === "object") return JSON.stringify(value);
+  if (/(?:_at|timestamp|time_utc|close_time)$/.test(key) && !Number.isNaN(Date.parse(value))) {
+    return `${dateTime(value)} · UTC ${value}`;
+  }
+  return value;
+}
+
+function candidateSection(heading, object) {
+  return `<section><p class="eyebrow">${esc(heading)}</p>${Object.entries(object || {}).map(([key, value]) =>
+    auditField(title(key), candidateFieldValue(key, value))
+  ).join("")}</section>`;
+}
+
+function candidateDetails(candidate) {
+  const decision = {
+    accepted: candidate.accepted,
+    edge_percentage_points: candidate.edge_percentage_points,
+    evaluated_at: candidate.evaluated_at,
+    rejection_reasons: candidate.rejection_reasons,
+  };
+  return `<details class="audit-details candidate-details">
+    <summary>Inspect all candidate data</summary>
+    <div class="audit-comparison candidate-audit">
+      ${candidateSection("Decision", decision)}
+      ${candidateSection("Liquidity qualification", candidate.liquidity)}
+      ${candidateSection("Prediction-market quote", candidate.prediction_quote)}
+      ${candidateSection("Sportsbook quote", candidate.sportsbook_quote)}
+      ${candidateSection("Prediction order book", candidate.order_book)}
+    </div>
+  </details>`;
+}
+
 function renderCandidates() {
   const sport = $("#candidateSportFilter").value, status = $("#candidateStatusFilter").value, reason = $("#candidateReasonFilter").value, market = $("#candidateMarketFilter").value;
   const search = $("#candidateSearch").value.trim().toLocaleLowerCase();
@@ -402,7 +436,9 @@ function renderCandidates() {
     <div><span class="cell-sub">Spread</span><span class="cell-main">${c.liquidity.spread_cents == null ? "—" : `${number(c.liquidity.spread_cents,1)}¢`}</span></div>
     <div><span class="cell-sub">Depth</span><span class="cell-main">${money(c.liquidity.total_depth_within_window_usd)}</span></div>
     <div class="reasons">${c.rejection_reasons.length ? c.rejection_reasons.map(r => `<span class="reason">${title(r)}</span>`).join("") : `<span class="cell-sub">All checks passed</span>`}</div>
-    <span class="decision ${c.accepted ? "accepted" : ""}">${c.accepted ? "Accepted" : "Rejected"}</span></article>`).join("") ||
+    <span class="decision ${c.accepted ? "accepted" : ""}">${c.accepted ? "Accepted" : "Rejected"}</span>
+    ${candidateDetails(c)}
+  </article>`).join("") ||
     `<div class="empty-state"><span>◇</span><h3>No candidates match</h3><p>Adjust the decision filters.</p></div>`;
 }
 

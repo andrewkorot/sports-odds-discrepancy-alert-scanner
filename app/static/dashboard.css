@@ -270,6 +270,10 @@ tbody tr:hover { background: #fbfcfb; }
 
 .candidate-list { display: grid; gap: 8px; }
 .candidate-card { display: grid; grid-template-columns: 1.5fr .8fr .8fr 1.3fr auto; gap: 14px; align-items: center; padding: 15px 17px; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; }
+.candidate-details { grid-column: 1 / -1; margin-left: 0; width: 100%; }
+.candidate-audit { align-items: start; }
+.candidate-audit section { min-width: 0; }
+.candidate-audit .audit-field strong { white-space: pre-wrap; }
 .decision { padding: 5px 8px; border-radius: 999px; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--danger); background: var(--danger-soft); }
 .decision.accepted { color: var(--brand); background: var(--brand-soft); }
 .reasons { display: flex; gap: 5px; flex-wrap: wrap; }

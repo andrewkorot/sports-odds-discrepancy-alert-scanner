@@ -72,6 +72,10 @@ async def test_full_dashboard_can_be_reenabled() -> None:
         assert 'id="matchedSearch"' in response.text
         assert 'id="unmatchedSearch"' in response.text
         assert 'id="candidateSearch"' in response.text
+        script = await client.get("/static/dashboard.js")
+        assert "Inspect all candidate data" in script.text
+        assert 'candidateSection("Prediction-market quote"' in script.text
+        assert 'candidateSection("Sportsbook quote"' in script.text
     assert "PitchEdge" in response.text
     assert 'id="matchedList"' in response.text
 
