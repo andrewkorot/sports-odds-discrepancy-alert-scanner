@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -10,7 +11,9 @@ def format_telegram_alert(
     best: Opportunity,
     predictions: Sequence[PredictionMarketQuote],
     sportsbooks: Sequence[SportsbookQuote],
+    client_timezone: str = "America/Los_Angeles",
 ) -> str:
+    localized_kickoff = best.kickoff_time_utc.astimezone(ZoneInfo(client_timezone))
     matching_predictions = [
         quote
         for quote in predictions
@@ -60,7 +63,7 @@ def format_telegram_alert(
     return (
         f"🚨 {best.sport.upper()} PRICE DISCREPANCY\n\n"
         f"{best.competition}\n{best.home_team} vs {best.away_team}\n"
-        f"Kickoff: {best.kickoff_time_utc:%Y-%m-%d %H:%M UTC}\n\n"
+        f"Kickoff: {localized_kickoff:%Y-%m-%d %I:%M %p %Z}\n\n"
         f"Market:\n{best.market_type.value.title()} — {selection} — {period_label}\n\n"
         "BEST OPPORTUNITY\n\n"
         f"Prediction market: {best.prediction_market_provider.value.title()}\n"

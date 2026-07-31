@@ -35,9 +35,16 @@ async def test_duplicate_suppression_and_realert() -> None:
 
 def test_telegram_formatting() -> None:
     item, predictions, sportsbooks = opportunity()
-    message = format_telegram_alert(item, predictions, sportsbooks)
+    message = format_telegram_alert(
+        item,
+        predictions,
+        sportsbooks,
+        "America/Los_Angeles",
+    )
     assert "SOCCER PRICE DISCREPANCY" in message
     assert "Executable YES ask" in message
     assert "PREDICTION MARKETS" in message
     assert "SPORTSBOOKS" in message
     assert item.bookmaker_display_name in message
+    assert " PST" in message
+    assert " UTC" not in message

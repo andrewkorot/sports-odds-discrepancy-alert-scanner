@@ -86,7 +86,10 @@ class AlertCoordinator:
                 self.settings.alert_edge_change_threshold * 100,
             ):
                 message = format_telegram_alert(
-                    opportunity, self.scanner.predictions, self.scanner.sportsbooks
+                    opportunity,
+                    self.scanner.predictions,
+                    self.scanner.sportsbooks,
+                    self.settings.client_timezone,
                 )
                 try:
                     await self.sender.send(message)
