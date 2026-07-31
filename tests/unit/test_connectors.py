@@ -14,7 +14,11 @@ from app.providers.kalshi.connector import (
     KalshiEventPayload,
     KalshiMarketPayload,
 )
-from app.providers.oddspapi.connector import SportsOddsConnector, sanitized_error
+from app.providers.oddspapi.connector import (
+    OddsPapiHTTPError,
+    SportsOddsConnector,
+    sanitized_error,
+)
 from app.providers.polymarket.connector import GammaEventPayload, PolymarketConnector
 from app.services.provider_normalization import normalize_order_book
 
@@ -373,6 +377,29 @@ def test_oddspapi_error_sanitization_does_not_include_request_url() -> None:
     message = sanitized_error(error)
     assert message == "OddsPapi HTTP 401"
     assert "do-not-print" not in message
+
+
+@pytest.mark.asyncio
+async def test_oddspapi_http_failure_raises_credential_safe_exception() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    connector = SportsOddsConnector(
+        "do-not-print",
+        "https://api.oddspapi.io/v4",
+        ["pinnacle"],
+        client,
+    )
+
+    with pytest.raises(OddsPapiHTTPError, match="OddsPapi HTTP 403") as captured:
+        await connector.discover_events(
+            datetime(2026, 7, 30, tzinfo=UTC),
+            datetime(2026, 7, 31, tzinfo=UTC),
+        )
+
+    assert "do-not-print" not in str(captured.value)
+    await client.aclose()
 
 
 @pytest.mark.asyncio

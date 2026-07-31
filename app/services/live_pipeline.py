@@ -58,11 +58,16 @@ logger = logging.getLogger("uvicorn.error")
 
 
 def _http_error_context(exc: Exception) -> tuple[int | None, str | None]:
-    if not isinstance(exc, httpx.HTTPStatusError):
-        return None, None
+    if isinstance(exc, httpx.HTTPStatusError):
+        return (
+            exc.response.status_code,
+            exc.response.headers.get("retry-after"),
+        )
+    status_code = getattr(exc, "status_code", None)
+    retry_after = getattr(exc, "retry_after", None)
     return (
-        exc.response.status_code,
-        exc.response.headers.get("retry-after"),
+        status_code if isinstance(status_code, int) else None,
+        retry_after if isinstance(retry_after, str) else None,
     )
 
 

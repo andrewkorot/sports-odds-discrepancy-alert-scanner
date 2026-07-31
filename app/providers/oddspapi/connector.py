@@ -28,7 +28,18 @@ SPORT_ID_SOCCER = 10
 logger = logging.getLogger("uvicorn.error")
 
 
+class OddsPapiHTTPError(RuntimeError):
+    """HTTP failure that deliberately excludes the credential-bearing URL."""
+
+    def __init__(self, status_code: int, retry_after: str | None = None) -> None:
+        self.status_code = status_code
+        self.retry_after = retry_after
+        super().__init__(f"OddsPapi HTTP {status_code}")
+
+
 def sanitized_error(exc: Exception) -> str:
+    if isinstance(exc, OddsPapiHTTPError):
+        return str(exc)
     if isinstance(exc, httpx.HTTPStatusError):
         return f"OddsPapi HTTP {exc.response.status_code}"
     if isinstance(exc, httpx.RequestError):
@@ -127,16 +138,24 @@ class SportsOddsConnector:
             )
             return response.json()
         except (httpx.HTTPError, ValueError) as exc:
+            safe_exception: Exception = exc
+            if isinstance(exc, httpx.HTTPStatusError):
+                safe_exception = OddsPapiHTTPError(
+                    exc.response.status_code,
+                    exc.response.headers.get("retry-after"),
+                )
             self._health = self._health.model_copy(
                 update={
                     "connected": False,
                     "last_attempt_at": attempted,
                     "last_failure_at": datetime.now(UTC),
                     "consecutive_failures": self._health.consecutive_failures + 1,
-                    "latest_error_code": type(exc).__name__,
-                    "sanitized_latest_error": sanitized_error(exc),
+                    "latest_error_code": type(safe_exception).__name__,
+                    "sanitized_latest_error": sanitized_error(safe_exception),
                 }
             )
+            if safe_exception is not exc:
+                raise safe_exception from None
             raise
 
     async def discover_events(
