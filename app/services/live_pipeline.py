@@ -34,7 +34,7 @@ from app.domain.models import (
     SportsbookQuote,
 )
 from app.providers.base import PredictionMarketConnector
-from app.providers.oddspapi.connector import SportsOddsConnector
+from app.providers.oddspapi.connector import SportsOddsConnector, sanitized_error
 from app.providers.oddspapi.mapping import CANONICAL_BOOKMAKERS
 from app.providers.records import (
     ProviderEvent,
@@ -1020,34 +1020,6 @@ async def collect_live_snapshot(
             kickoff_time_utc=event.scheduled_start,
         )
 
-    async def fetch_event_odds(
-        event: ProviderEvent,
-    ) -> tuple[ProviderEvent, list[ProviderSportsbookQuote]]:
-        try:
-            logger.info(
-                "pricing.sportsbook.start event_id=%s title=%r",
-                event.provider_event_id,
-                event.title,
-            )
-            async with request_semaphore:
-                event_odds = await sports_connector.get_event_odds(event.provider_event_id)
-            logger.info(
-                "pricing.sportsbook.complete event_id=%s quotes=%d",
-                event.provider_event_id,
-                len(event_odds),
-            )
-        except Exception as exc:
-            status_code, retry_after = _http_error_context(exc)
-            logger.warning(
-                "pricing.sportsbook.failed event_id=%s error_type=%s status_code=%s retry_after=%s",
-                event.provider_event_id,
-                type(exc).__name__,
-                status_code,
-                retry_after,
-            )
-            return event, []
-        return event, event_odds
-
     predictions: list[PredictionMarketQuote] = []
     order_books: dict[str, OrderBookSnapshot] = {}
     prediction_jobs: list[tuple[PredictionMarketConnector, ProviderEvent, ProviderEvent]] = []
@@ -1124,8 +1096,44 @@ async def collect_live_snapshot(
         len(priceable_sportsbook_events),
         len(matched_sportsbook_events) - len(priceable_sportsbook_events),
     )
-    odds_results = await asyncio.gather(
-        *(fetch_event_odds(event) for event in priceable_sportsbook_events)
+    logger.info(
+        "pricing.sportsbook.bulk.start events=%d tournaments=%d",
+        len(priceable_sportsbook_events),
+        len(
+            {
+                event.provider_competition_id
+                for event in priceable_sportsbook_events
+                if event.provider_competition_id is not None
+            }
+        ),
+    )
+    bulk_odds: dict[str, list[ProviderSportsbookQuote]] = {}
+    if priceable_sportsbook_events:
+        try:
+            async with request_semaphore:
+                bulk_odds = await sports_connector.get_events_odds(priceable_sportsbook_events)
+        except Exception as exc:
+            status_code, retry_after = _http_error_context(exc)
+            logger.warning(
+                "pricing.sportsbook.bulk.failed events=%d error_type=%s "
+                "status_code=%s retry_after=%s provider_error=%r",
+                len(priceable_sportsbook_events),
+                type(exc).__name__,
+                status_code,
+                retry_after,
+                sanitized_error(exc),
+            )
+            # Matching has already completed. Preserve and publish that audit
+            # snapshot even when bulk pricing is temporarily unavailable; an
+            # odds failure must not make valid matches disappear from the UI.
+            bulk_odds = {event.provider_event_id: [] for event in priceable_sportsbook_events}
+    odds_results = [
+        (event, bulk_odds.get(event.provider_event_id, [])) for event in priceable_sportsbook_events
+    ]
+    logger.info(
+        "pricing.sportsbook.bulk.complete fixtures=%d quotes=%d",
+        len(bulk_odds),
+        sum(len(quotes) for quotes in bulk_odds.values()),
     )
     for event, event_odds in odds_results:
         event_id = canonical_event_id(event)

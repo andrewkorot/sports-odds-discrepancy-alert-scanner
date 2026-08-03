@@ -83,7 +83,7 @@ def format_telegram_alert(
         f"Depth within {depth_window_label} {depth_window_unit} of midpoint: "
         f"${best.total_depth_within_window_usd:,.0f} — PASSED\n"
         f"Trailing 24-hour volume: ${best.trailing_24h_volume_usd:,.0f} — PASSED\n"
-        "Game date: Today — PASSED\n\n"
+        "Pregame timing: PASSED\n\n"
         f"PREDICTION MARKETS\n\n{prediction_lines}\n\n"
         f"SPORTSBOOKS\n\n{sportsbook_lines}\n\n"
         f"QUALITY\n\n✓ Exact/approved event match\n✓ Same {period_label} settlement\n"

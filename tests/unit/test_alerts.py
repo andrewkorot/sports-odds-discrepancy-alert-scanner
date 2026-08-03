@@ -50,3 +50,4 @@ def test_telegram_formatting() -> None:
     assert " PST" in message
     assert " UTC" not in message
     assert "Depth within 4.5 cents of midpoint" in message
+    assert "Pregame timing: PASSED" in message

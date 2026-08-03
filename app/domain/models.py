@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -24,8 +24,10 @@ class DomainModel(BaseModel):
     @field_validator("*", mode="before")
     @classmethod
     def require_aware_datetimes(cls, value: object) -> object:
-        if isinstance(value, datetime) and value.tzinfo is None:
-            raise ValueError("timestamps must be timezone-aware UTC values")
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                raise ValueError("timestamps must be timezone-aware UTC values")
+            return value.astimezone(UTC)
         return value
 
 

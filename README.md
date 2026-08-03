@@ -58,7 +58,7 @@ Every variable is also present in `.env.example`.
 | `REDIS_URL` | Redis connection URL |
 | `SPORTS_ODDS_API_KEY` | OddsPapi consumer v4 key when its mode is live |
 | `SPORTS_ODDS_BASE_URL` | OddsPapi consumer v4 base URL |
-| `ODDSPAPI_DISCOVERY_DUMP_PATH` | Latest raw OddsPapi fixture snapshot; blank disables export |
+| `ODDSPAPI_DISCOVERY_DUMP_PATH` | Latest raw OddsPapi fixture and bulk tournament-odds responses; blank disables export |
 | `KALSHI_API_KEY_ID` | Read-scoped Kalshi API key ID |
 | `KALSHI_PRIVATE_KEY_PATH` | Kalshi signing key path, live mode only |
 | `KALSHI_MODE` | `mock`, `live`, or `disabled` |
@@ -71,7 +71,7 @@ Every variable is also present in `.env.example`.
 | `TELEGRAM_CHAT_ID` | Optional Telegram destination |
 | `ENABLED_SPORTS` | Comma-separated canonical sports; currently `soccer` |
 | `ENABLED_BOOKMAKERS` | Six comma-separated canonical IDs |
-| `CLIENT_TIMEZONE` | Calendar-day timezone (`America/Los_Angeles`) |
+| `CLIENT_TIMEZONE` | Presentation timezone for dashboard and Telegram only (`America/Los_Angeles`) |
 | `ENABLED_MARKET_TYPES` | `moneyline,total,spread,btts` |
 | `MAX_BID_ASK_SPREAD_CENTS` | Strict spread ceiling (`5`) |
 | `DEPTH_WINDOW_FROM_MIDPOINT_CENTS` | Two-sided depth window (`3`) |
@@ -83,7 +83,7 @@ Every variable is also present in `.env.example`.
 | `MIN_KALSHI_ASK_SIZE` | Minimum Kalshi executable contracts (`100`) |
 | `MIN_POLYMARKET_ASK_SIZE` | Minimum Polymarket executable size (`100`) |
 | `MIN_MINUTES_BEFORE_KICKOFF` | Earliest pregame boundary. controls how close to kickoff an event can be before it stops qualifying as an opportunity. (`10`) |
-| `DISCOVERY_CALENDAR_DAYS` | Number of complete client-timezone calendar days to discover (`1` = today only) |
+| `DISCOVERY_CALENDAR_DAYS` | Number of complete UTC calendar days to discover (`1` = current UTC day) |
 | `ALERT_COOLDOWN_MINUTES` | Duplicate alert cooldown (`10`) |
 | `REALERT_EDGE_INCREASE_PP` | Early re-alert edge improvement (`1.0`) |
 | `PRICE_POLL_INTERVAL_SECONDS` | Recurring scan interval (`30`) |
@@ -207,11 +207,11 @@ SPORTS_ODDS_MODE=live
 A failed provider updates only its own sanitized health record. This project
 uses REST polling exclusively for Kalshi, Polymarket, and OddsPapi.
 
-The application scans whole calendar days in `CLIENT_TIMEZONE`, beginning at
-today's local midnight. `DISCOVERY_CALENDAR_DAYS=1` scans today only, `2`
-scans today and tomorrow, and `3` scans three calendar days. The ending local
-midnight is exclusive. Provider boundaries are converted to UTC, including
-daylight-saving transitions. Scans run once at startup and then every
+The application scans whole UTC calendar days, beginning at the current UTC
+day's midnight. `DISCOVERY_CALENDAR_DAYS=1` scans the current UTC day, `2`
+scans the current and next UTC days, and `3` scans three UTC days. The ending
+midnight is exclusive. `CLIENT_TIMEZONE` affects dashboard and alert display,
+not discovery boundaries. Scans run once at startup and then every
 `PRICE_POLL_INTERVAL_SECONDS`. Telegram is output-only and delivery occurs only
 when all three conditions are true:
 

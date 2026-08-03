@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -7,7 +8,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from app.domain.enums import AvailabilityStatus, Selection, VolumeSource
+from app.domain.enums import AvailabilityStatus, Provider, Selection, VolumeSource
 from app.domain.models import Bookmaker
 from app.providers.kalshi.connector import (
     KalshiConnector,
@@ -21,6 +22,7 @@ from app.providers.oddspapi.connector import (
     sanitized_error,
 )
 from app.providers.polymarket.connector import GammaEventPayload, PolymarketConnector
+from app.providers.records import ProviderEvent
 from app.services.provider_normalization import normalize_order_book
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
@@ -380,6 +382,41 @@ def test_oddspapi_error_sanitization_does_not_include_request_url() -> None:
     assert "do-not-print" not in message
 
 
+def test_oddspapi_bulk_dump_preserves_fixture_records(tmp_path: Path) -> None:
+    dump_path = tmp_path / "oddspapi_discovered_events.json"
+    SportsOddsConnector._write_discovery_dump(
+        dump_path,
+        {"record_count": 1, "records": [{"fixtureId": "fixture-1"}]},
+    )
+
+    SportsOddsConnector._append_bulk_dump(
+        dump_path,
+        {
+            "tournament_ids": ["17"],
+            "response_count": 1,
+            "responses": [
+                {
+                    "bookmaker": "pinnacle",
+                    "status": "success",
+                    "response": {"fixtureId": "fixture-1", "bookmakerOdds": {}},
+                }
+            ],
+        },
+    )
+
+    document = json.loads(dump_path.read_text(encoding="utf-8"))
+    assert document["records"][0]["fixtureId"] == "fixture-1"
+    assert document["odds_by_tournaments"]["responses"][0]["bookmaker"] == "pinnacle"
+
+    SportsOddsConnector._write_fixture_dump_preserving_bulk(
+        dump_path,
+        {"record_count": 1, "records": [{"fixtureId": "fixture-2"}]},
+    )
+    next_scan = json.loads(dump_path.read_text(encoding="utf-8"))
+    assert next_scan["records"][0]["fixtureId"] == "fixture-2"
+    assert next_scan["odds_by_tournaments"]["responses"][0]["bookmaker"] == "pinnacle"
+
+
 def test_oddspapi_recognizable_bookmaker_outcome_must_agree_with_catalog() -> None:
     assert bookmaker_outcome_agrees("away", "away")
     assert bookmaker_outcome_agrees("away", "2")
@@ -391,7 +428,14 @@ def test_oddspapi_recognizable_bookmaker_outcome_must_agree_with_catalog() -> No
 @pytest.mark.asyncio
 async def test_oddspapi_http_failure_raises_credential_safe_exception() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(403, request=request)
+        return httpx.Response(
+            403,
+            request=request,
+            json={
+                "message": "Invalid bookmakers parameter",
+                "request": f"{request.url}",
+            },
+        )
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     connector = SportsOddsConnector(
@@ -408,18 +452,28 @@ async def test_oddspapi_http_failure_raises_credential_safe_exception() -> None:
         )
 
     assert "do-not-print" not in str(captured.value)
+    assert "Invalid bookmakers parameter" in str(captured.value)
     await client.aclose()
 
 
 @pytest.mark.asyncio
-async def test_oddspapi_v4_fixture_discovery_contract(tmp_path: Path) -> None:
+async def test_oddspapi_v4_fixture_discovery_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def run_inline(function: object, *args: object) -> object:
+        assert callable(function)
+        return function(*args)
+
+    monkeypatch.setattr(asyncio, "to_thread", run_inline)
+
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v4/fixtures"
         assert request.url.params["apiKey"] == "secret"
         assert request.url.params["sportId"] == "10"
         assert request.url.params["statusId"] == "0"
         assert request.url.params["hasOdds"] == "true"
-        assert request.url.params["bookmakers"] == "bookmaker.eu,pinnacle-sports"
+        assert "bookmakers" not in request.url.params
+        assert "bookmaker" not in request.url.params
         assert "from" in request.url.params and "to" in request.url.params
         return httpx.Response(
             200,
@@ -429,6 +483,7 @@ async def test_oddspapi_v4_fixture_discovery_contract(tmp_path: Path) -> None:
                     "participant1Name": "Inter Miami CF",
                     "participant2Name": "Atlanta United",
                     "tournamentName": "MLS",
+                    "tournamentId": 17,
                     "startTime": "2026-07-30T20:00:00.000Z",
                     "statusId": 0,
                     "statusName": "Pre-Game",
@@ -466,12 +521,52 @@ async def test_oddspapi_v4_fixture_discovery_contract(tmp_path: Path) -> None:
     events = await connector.discover_events(start, start + timedelta(hours=24))
     assert events[0].provider_event_id == "fixture-1"
     assert events[0].title == "Inter Miami CF vs Atlanta United"
+    assert events[0].provider_competition_id == "17"
     assert events[0].scheduled_start == datetime(2026, 7, 30, 20, tzinfo=UTC)
     dump = json.loads((tmp_path / "oddspapi-events.json").read_text())
     assert dump["record_count"] == 1
-    assert dump["bookmaker_slugs"] == ["bookmaker.eu", "pinnacle-sports"]
+    assert dump["bookmaker_filter"] is None
+    assert dump["configured_bookmaker_slugs"] == ["bookmaker.eu", "pinnacle-sports"]
     assert dump["records"][0]["fixtureId"] == "fixture-1"
     assert "apiKey" not in json.dumps(dump)
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_oddspapi_accepts_configured_slugs_confirmed_by_live_catalog() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v4/bookmakers"
+        return httpx.Response(
+            200,
+            json=[
+                {"slug": "pinnacle", "bookmakerName": "Pinnacle", "active": True},
+                {"slug": "leovegas", "bookmakerName": "LeoVegas", "active": True},
+                {"slug": "888sport", "bookmakerName": "888sport", "active": True},
+                {"slug": "unconfigured", "bookmakerName": "Other Book", "active": True},
+            ],
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    connector = SportsOddsConnector(
+        "secret",
+        "https://api.oddspapi.io/v4",
+        ["pinnacle", "leovegas", "888sport"],
+        client,
+    )
+
+    mapped, unknown = await connector.list_bookmakers()
+
+    assert {item.canonical_id for item in mapped} == {
+        "pinnacle",
+        "leovegas",
+        "888sport",
+    }
+    assert {item.provider_bookmaker_id for item in mapped} == {
+        "pinnacle",
+        "leovegas",
+        "888sport",
+    }
+    assert unknown == ["Other Book (unconfigured)"]
     await client.aclose()
 
 
@@ -545,4 +640,205 @@ async def test_oddspapi_v4_odds_contract_and_nested_mapping() -> None:
     assert quotes[0].provider_outcome_id == 102
     assert quotes[0].decimal_odds == Decimal("2.15")
     assert quotes[0].changed_at == datetime(2026, 7, 30, 12, tzinfo=UTC)
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_oddspapi_bulk_odds_contract_filters_unrequested_fixtures() -> None:
+    requested_paths: list[str] = []
+
+    def odds_payload(fixture_id: str) -> dict[str, object]:
+        return {
+            "fixtureId": fixture_id,
+            "bookmakerOdds": {
+                "bookmaker.eu": {
+                    "markets": {
+                        "101": {
+                            "marketActive": True,
+                            "outcomes": {
+                                "102": {
+                                    "players": {
+                                        "0": {
+                                            "active": True,
+                                            "bookmakerOutcomeId": "home",
+                                            "changedAt": "2026-07-30T12:00:00.000Z",
+                                            "price": 2.15,
+                                            "mainLine": True,
+                                        }
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            },
+        }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_paths.append(request.url.path)
+        if request.url.path == "/v4/markets":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "marketId": 101,
+                        "playerProp": False,
+                        "sportId": 10,
+                        "period": "fulltime",
+                        "marketType": "1x2",
+                        "outcomes": [{"outcomeId": 102, "outcomeName": "1"}],
+                    }
+                ],
+            )
+        assert request.url.path == "/v4/odds-by-tournaments"
+        assert request.url.params["tournamentIds"] == "17,8"
+        assert request.url.params["bookmaker"] == "bookmaker.eu"
+        assert "bookmakers" not in request.url.params
+        assert request.url.params["language"] == "en"
+        assert request.url.params["verbosity"] == "3"
+        assert request.url.params["oddsFormat"] == "decimal"
+        return httpx.Response(
+            200,
+            json=[odds_payload("fixture-1"), odds_payload("unrequested-fixture")],
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    connector = SportsOddsConnector(
+        "secret", "https://api.oddspapi.io/v4", ["bookmaker_eu"], client
+    )
+    connector.use_provider_bookmaker_ids(
+        [
+            Bookmaker(
+                canonical_id="bookmaker_eu",
+                display_name="BookMaker.eu",
+                provider_bookmaker_id="bookmaker.eu",
+                availability_status=AvailabilityStatus.AVAILABLE,
+            )
+        ],
+        ["bookmaker_eu"],
+    )
+    events = [
+        ProviderEvent(
+            provider=Provider.ODDSPAPI,
+            provider_event_id=f"fixture-{index}",
+            title=f"Home {index} vs Away {index}",
+            status="Pre-Game",
+            provider_competition_id=tournament_id,
+        )
+        for index, tournament_id in ((1, "17"), (2, "8"))
+    ]
+
+    quotes_by_fixture = await connector.get_events_odds(events)
+
+    assert requested_paths == ["/v4/markets", "/v4/odds-by-tournaments"]
+    assert len(quotes_by_fixture["fixture-1"]) == 1
+    assert quotes_by_fixture["fixture-2"] == []
+    assert "unrequested-fixture" not in quotes_by_fixture
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_oddspapi_bulk_odds_chunks_tournaments_at_five(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tournament_requests: list[str] = []
+
+    async def skip_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", skip_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v4/markets":
+            return httpx.Response(200, json=[])
+        assert request.url.path == "/v4/odds-by-tournaments"
+        assert request.url.params["bookmaker"] == "pinnacle"
+        tournament_requests.append(request.url.params["tournamentIds"])
+        return httpx.Response(200, json=[])
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    connector = SportsOddsConnector("secret", "https://api.oddspapi.io/v4", ["pinnacle"], client)
+    connector.use_provider_bookmaker_ids(
+        [
+            Bookmaker(
+                canonical_id="pinnacle",
+                display_name="Pinnacle",
+                provider_bookmaker_id="pinnacle",
+                availability_status=AvailabilityStatus.AVAILABLE,
+            )
+        ],
+        ["pinnacle"],
+    )
+    events = [
+        ProviderEvent(
+            provider=Provider.ODDSPAPI,
+            provider_event_id=f"fixture-{index}",
+            title=f"Home {index} vs Away {index}",
+            status="Pre-Game",
+            provider_competition_id=str(index),
+        )
+        for index in range(1, 7)
+    ]
+
+    await connector.get_events_odds(events)
+
+    assert tournament_requests == ["1,2,3,4,5", "6"]
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_oddspapi_bulk_odds_retries_rate_limited_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bulk_attempts = 0
+    delays: list[float] = []
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", record_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal bulk_attempts
+        if request.url.path == "/v4/markets":
+            return httpx.Response(200, json=[])
+        bulk_attempts += 1
+        if bulk_attempts == 1:
+            return httpx.Response(
+                429,
+                json={
+                    "error": {
+                        "message": "You are being rate limited.",
+                        "code": "RATE_LIMITED",
+                        "retryMs": 133,
+                    }
+                },
+            )
+        return httpx.Response(200, json=[])
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    connector = SportsOddsConnector("secret", "https://api.oddspapi.io/v4", ["kalshi"], client)
+    connector.use_provider_bookmaker_ids(
+        [
+            Bookmaker(
+                canonical_id="kalshi",
+                display_name="Kalshi",
+                provider_bookmaker_id="kalshi",
+                availability_status=AvailabilityStatus.AVAILABLE,
+            )
+        ],
+        ["kalshi"],
+    )
+    event = ProviderEvent(
+        provider=Provider.ODDSPAPI,
+        provider_event_id="fixture-1",
+        title="Home vs Away",
+        status="Pre-Game",
+        provider_competition_id="21",
+    )
+
+    await connector.get_events_odds([event])
+
+    assert bulk_attempts == 2
+    assert delays == [pytest.approx(1.05)]
     await client.aclose()

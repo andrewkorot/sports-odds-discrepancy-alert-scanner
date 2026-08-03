@@ -60,6 +60,7 @@ services:
     ports: ["8000:8000"]
     volumes:
       - ${KALSHI_PRIVATE_KEY_HOST_PATH:-./kalshi_private_key.pem}:/run/secrets/kalshi_private_key.pem:ro
+      - ./runtime:/app/runtime
 
 volumes:
   postgres_data:

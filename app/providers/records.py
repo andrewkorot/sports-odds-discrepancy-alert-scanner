@@ -1,15 +1,24 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.enums import Provider
 
 
 class ProviderRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def normalize_aware_datetimes_to_utc(cls, value: object) -> object:
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                raise ValueError("provider timestamps must be timezone-aware")
+            return value.astimezone(UTC)
+        return value
 
 
 class ProviderEvent(ProviderRecord):
@@ -21,6 +30,7 @@ class ProviderEvent(ProviderRecord):
     status: str
     sport: str | None = None
     competition: str | None = None
+    provider_competition_id: str | None = None
     home_team: str | None = None
     away_team: str | None = None
     participant_one: str | None = None

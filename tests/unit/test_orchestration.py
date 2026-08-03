@@ -52,7 +52,7 @@ async def test_enabled_delivery_is_deduplicated() -> None:
     assert await coordinator.process() == 0
 
 
-def test_discovery_window_uses_client_timezone_calendar_day() -> None:
+def test_discovery_window_uses_utc_calendar_days() -> None:
     now = datetime(2026, 7, 30, 16, 45, tzinfo=UTC)
     settings = Settings(
         app_mode="mock",
@@ -68,11 +68,11 @@ def test_discovery_window_uses_client_timezone_calendar_day() -> None:
 
     start, end = orchestrator._discovery_window()
 
-    assert start == datetime(2026, 7, 30, 7, tzinfo=UTC)
-    assert end == datetime(2026, 8, 2, 7, tzinfo=UTC)
+    assert start == datetime(2026, 7, 30, 0, tzinfo=UTC)
+    assert end == datetime(2026, 8, 2, 0, tzinfo=UTC)
 
 
-def test_discovery_window_respects_pacific_daylight_saving_transition() -> None:
+def test_discovery_window_is_not_affected_by_client_timezone_dst() -> None:
     now = datetime(2026, 11, 1, 12, tzinfo=UTC)
     settings = Settings(
         app_mode="mock",
@@ -88,5 +88,5 @@ def test_discovery_window_respects_pacific_daylight_saving_transition() -> None:
 
     start, end = orchestrator._discovery_window()
 
-    assert start == datetime(2026, 11, 1, 7, tzinfo=UTC)
-    assert end == datetime(2026, 11, 2, 8, tzinfo=UTC)
+    assert start == datetime(2026, 11, 1, 0, tzinfo=UTC)
+    assert end == datetime(2026, 11, 2, 0, tzinfo=UTC)

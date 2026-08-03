@@ -75,7 +75,6 @@ def evaluate_candidates(
                 event_time_rejections(
                     prediction.kickoff_time_utc,
                     now,
-                    settings.client_timezone,
                     settings.min_minutes_before_kickoff,
                 )
             )

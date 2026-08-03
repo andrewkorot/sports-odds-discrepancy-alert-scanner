@@ -1,4 +1,3 @@
-import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -89,6 +88,7 @@ class FakePredictionConnector:
 class FakeSportsConnector:
     def __init__(self) -> None:
         self.odds_requests = 0
+        self.bulk_odds_requests = 0
 
     def use_provider_bookmaker_ids(
         self, mapped: list[Bookmaker], enabled_canonical_ids: list[str]
@@ -106,6 +106,7 @@ class FakeSportsConnector:
                 category="MLS",
                 sport="soccer",
                 competition="MLS",
+                provider_competition_id="mls",
                 home_team="Inter Miami",
                 away_team="Atlanta United",
                 scheduled_start=datetime(2026, 7, 30, 20, tzinfo=UTC),
@@ -141,6 +142,15 @@ class FakeSportsConnector:
                 period="regulation",
             )
         ]
+
+    async def get_events_odds(
+        self, events: list[ProviderEvent]
+    ) -> dict[str, list[ProviderSportsbookQuote]]:
+        self.bulk_odds_requests += 1
+        return {
+            event.provider_event_id: await self.get_event_odds(event.provider_event_id)
+            for event in events
+        }
 
 
 class FailingPredictionConnector(FakePredictionConnector):
@@ -236,9 +246,7 @@ class MultiEventPredictionConnector(FakePredictionConnector):
 
 class ConcurrentSportsConnector(FakeSportsConnector):
     def __init__(self) -> None:
-        self.active = 0
-        self.maximum_active = 0
-        self.both_started = asyncio.Event()
+        super().__init__()
 
     async def discover_events(
         self, start_time: datetime, end_time: datetime
@@ -252,6 +260,7 @@ class ConcurrentSportsConnector(FakeSportsConnector):
                 category="MLS",
                 sport="soccer",
                 competition="MLS",
+                provider_competition_id="mls",
                 home_team=f"Home {index}",
                 away_team=f"Away {index}",
                 scheduled_start=kickoff,
@@ -260,14 +269,19 @@ class ConcurrentSportsConnector(FakeSportsConnector):
             for index in range(2)
         ]
 
-    async def get_event_odds(self, event_id: str) -> list[ProviderSportsbookQuote]:
-        self.active += 1
-        self.maximum_active = max(self.maximum_active, self.active)
-        if self.active >= 2:
-            self.both_started.set()
-        await asyncio.wait_for(self.both_started.wait(), timeout=1)
-        self.active -= 1
-        return []
+    async def get_events_odds(
+        self, events: list[ProviderEvent]
+    ) -> dict[str, list[ProviderSportsbookQuote]]:
+        self.bulk_odds_requests += 1
+        return {event.provider_event_id: [] for event in events}
+
+
+class FailingBulkSportsConnector(FakeSportsConnector):
+    async def get_events_odds(
+        self, events: list[ProviderEvent]
+    ) -> dict[str, list[ProviderSportsbookQuote]]:
+        self.bulk_odds_requests += 1
+        raise RuntimeError("bulk pricing unavailable")
 
 
 async def test_live_pipeline_retrieves_normalizes_matches_and_calculates() -> None:
@@ -298,7 +312,7 @@ async def test_live_pipeline_retrieves_normalizes_matches_and_calculates() -> No
     assert opportunity.edge_percentage_points > Decimal("5")
 
 
-async def test_sportsbook_pricing_requests_use_bounded_concurrency() -> None:
+async def test_sportsbook_pricing_uses_one_bulk_request_for_multiple_events() -> None:
     now = datetime(2026, 7, 30, 16, tzinfo=UTC)
     sports = ConcurrentSportsConnector()
 
@@ -314,7 +328,26 @@ async def test_sportsbook_pricing_requests_use_bounded_concurrency() -> None:
         now + timedelta(hours=8),
     )
 
-    assert sports.maximum_active == 2
+    assert sports.bulk_odds_requests == 1
+
+
+async def test_bulk_odds_failure_preserves_completed_event_matches() -> None:
+    now = datetime(2026, 7, 30, 16, tzinfo=UTC)
+    sports = FailingBulkSportsConnector()
+
+    snapshot = await collect_live_snapshot(
+        [FakePredictionConnector()],
+        sports,  # type: ignore[arg-type]
+        Settings(enabled_bookmakers=["pinnacle"]),
+        now,
+        now,
+        now + timedelta(hours=8),
+    )
+
+    assert sports.bulk_odds_requests == 1
+    assert any(audit.matched for audit in snapshot.event_matches)
+    assert snapshot.sportsbooks == []
+    assert snapshot.opportunities == []
 
 
 async def test_prediction_provider_failure_does_not_block_other_discovery() -> None:
@@ -400,6 +433,7 @@ async def test_odds_are_not_requested_without_an_eligible_prediction_market() ->
         item for item in snapshot.event_matches if item.provider == Provider.KALSHI
     )
     assert prediction_audit.matched
+    assert sports.bulk_odds_requests == 0
     assert sports.odds_requests == 0
     assert snapshot.sportsbooks == []
     assert snapshot.opportunities == []
