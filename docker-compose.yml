@@ -57,7 +57,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
-    ports: ["8000:8000"]
+    ports: ["80:8000"]
     volumes:
       - ${KALSHI_PRIVATE_KEY_HOST_PATH:-./kalshi_private_key.pem}:/run/secrets/kalshi_private_key.pem:ro
       - ./runtime:/app/runtime
