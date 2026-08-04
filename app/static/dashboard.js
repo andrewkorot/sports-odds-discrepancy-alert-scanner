@@ -1,5 +1,9 @@
 const DISPLAY_TIME_ZONE = "America/Los_Angeles";
-const state = { health: null, providers: [], events: [], eventMatches: [], bookmakers: [], opportunities: [], candidates: [], markets: [], settings: {}, matchedPage: 1, matchedPageSize: 8, unmatchedPage: 1, unmatchedPageSize: 8, refreshTimer: null };
+const CANDIDATE_MODAL_STORAGE_KEY = "scannerSelectedCandidateKey";
+const MAPPING_MODAL_STORAGE_KEY = "scannerSelectedMappingKey";
+const storedCandidateKey = (() => { try { return sessionStorage.getItem(CANDIDATE_MODAL_STORAGE_KEY); } catch { return null; } })();
+const storedMappingKey = (() => { try { return sessionStorage.getItem(MAPPING_MODAL_STORAGE_KEY); } catch { return null; } })();
+const state = { health: null, providers: [], events: [], eventMatches: [], bookmakers: [], opportunities: [], candidates: [], markets: [], settings: {}, matchedPage: 1, matchedPageSize: 8, unmatchedPage: 1, unmatchedPageSize: 8, refreshTimer: null, selectedCandidateKey: storedCandidateKey, selectedCandidateSnapshot: null, selectedMappingKey: storedMappingKey, selectedMappingSnapshot: null };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -81,6 +85,7 @@ function render() {
   renderRejections();
   renderMatchedEvents();
   renderUnmatchedEvents();
+  renderMappingModal();
   populateFilters();
   renderOpportunityTable();
   renderCandidates();
@@ -126,33 +131,7 @@ function renderMatchedEvents() {
         </div>
         <span class="decision accepted">${title(item.match_confidence)}</span>
       </div>
-      <details class="audit-details">
-        <summary>Inspect mapping</summary>
-        <div class="audit-comparison">
-          <section>
-            <p class="eyebrow">${title(item.provider)} event</p>
-            ${auditField("Provider event ID", item.provider_event_id)}
-            ${auditField("Raw title", item.title)}
-            ${auditField("Home team", item.home_team)}
-            ${auditField("Away team", item.away_team)}
-            ${auditField("Participant one", item.participant_one)}
-            ${auditField("Participant two", item.participant_two)}
-            ${auditField("Orientation known", item.orientation_known)}
-            ${auditField("Kickoff Pacific", item.kickoff_time_utc ? dateTime(item.kickoff_time_utc) : null)}
-          </section>
-          <section>
-            <p class="eyebrow">Matched OddsPapi fixture</p>
-            ${auditField("Sportsbook event ID", item.sportsbook_event_id)}
-            ${auditField("Raw title", item.sportsbook_title)}
-            ${auditField("Home team", item.sportsbook_home_team)}
-            ${auditField("Away team", item.sportsbook_away_team)}
-            ${auditField("Competition", item.sportsbook_competition)}
-            ${auditField("Kickoff Pacific", item.sportsbook_kickoff_time_utc ? dateTime(item.sportsbook_kickoff_time_utc) : null)}
-            ${auditField("Confidence", item.match_confidence)}
-            ${auditField("Weighted score", item.weighted_score)}
-          </section>
-        </div>
-      </details>
+      <button class="text-button mapping-audit-button" type="button" data-mapping-audit="${esc(mappingStableKey(item))}">Inspect mapping →</button>
     </article>`).join("") || `
     <div class="empty-state compact"><span>◇</span><h3>No matched events yet</h3><p>Approved Kalshi or Polymarket mappings will appear here during discovery.</p></div>`;
 
@@ -163,6 +142,7 @@ function renderMatchedEvents() {
     : "No events";
   $("#matchedPrevious").disabled = state.matchedPage <= 1;
   $("#matchedNext").disabled = state.matchedPage >= pageCount;
+  $$("#matchedList [data-mapping-audit]").forEach(button => button.addEventListener("click", () => openMappingModal(button.dataset.mappingAudit)));
 }
 
 function renderUnmatchedEvents() {
@@ -202,43 +182,7 @@ function renderUnmatchedEvents() {
         <div class="audit-reasons">${item.rejection_reasons.map(reason => `<span class="reason">${title(reason)}</span>`).join("")}</div>
         <span class="decision ${item.match_confidence === "manual_review" ? "review" : ""}">${title(item.match_confidence)}</span>
       </div>
-      <details class="audit-details">
-        <summary>Inspect extracted data</summary>
-        <div class="audit-comparison">
-          <section>
-            <p class="eyebrow">${title(item.provider)} event</p>
-            ${auditField("Provider event ID", item.provider_event_id)}
-            ${auditField("Raw title", item.title)}
-            ${auditField("Extracted competition", item.competition)}
-            ${auditField("Normalized competition", item.normalized_competition)}
-            ${auditField("Extracted home", item.home_team)}
-            ${auditField("Normalized home", item.normalized_home_team)}
-            ${auditField("Extracted away", item.away_team)}
-            ${auditField("Normalized away", item.normalized_away_team)}
-            ${auditField("Participant one", item.participant_one)}
-            ${auditField("Normalized participant one", item.normalized_participant_one)}
-            ${auditField("Participant two", item.participant_two)}
-            ${auditField("Normalized participant two", item.normalized_participant_two)}
-            ${auditField("Orientation known", item.orientation_known)}
-            ${auditField("Extraction source", item.extraction_source)}
-            ${auditField("Kickoff Pacific", item.kickoff_time_utc ? dateTime(item.kickoff_time_utc) : null)}
-          </section>
-          <section>
-            <p class="eyebrow">Closest OddsPapi candidate</p>
-            ${auditField("Sportsbook event ID", item.sportsbook_event_id)}
-            ${auditField("Raw title", item.sportsbook_title)}
-            ${auditField("Competition", item.sportsbook_competition)}
-            ${auditField("Home team", item.sportsbook_home_team)}
-            ${auditField("Away team", item.sportsbook_away_team)}
-            ${auditField("Kickoff Pacific", item.sportsbook_kickoff_time_utc ? dateTime(item.sportsbook_kickoff_time_utc) : null)}
-            ${auditField("Match confidence", item.match_confidence)}
-            ${auditField("Weighted score", item.weighted_score)}
-            ${auditField("Runner-up score", item.runner_up_score)}
-            ${auditField("Score breakdown", item.score_breakdown ? Object.entries(item.score_breakdown).map(([key, value]) => `${title(key)}: ${value}`).join(", ") : null)}
-            ${auditField("Rejection reasons", item.rejection_reasons.join(", "))}
-          </section>
-        </div>
-      </details>
+      <button class="text-button mapping-audit-button" type="button" data-mapping-audit="${esc(mappingStableKey(item))}">Inspect mapping →</button>
     </article>`).join("") || `
     <div class="empty-state compact"><span>✓</span><h3>No unmatched events</h3><p>Every discovered provider event currently has an approved counterpart.</p></div>`;
 
@@ -249,11 +193,96 @@ function renderUnmatchedEvents() {
     : "No events";
   $("#unmatchedPrevious").disabled = state.unmatchedPage <= 1;
   $("#unmatchedNext").disabled = state.unmatchedPage >= pageCount;
+  $$("#unmatchedList [data-mapping-audit]").forEach(button => button.addEventListener("click", () => openMappingModal(button.dataset.mappingAudit)));
 }
 
 function auditField(label, value) {
   const rendered = value == null || value === "" ? "Not extracted" : String(value);
   return `<div class="audit-field"><small>${esc(label)}</small><strong class="${rendered === "Not extracted" ? "missing-value" : ""}">${esc(rendered)}</strong></div>`;
+}
+
+function mappingStableKey(item) {
+  return JSON.stringify([item.provider, item.provider_event_id]);
+}
+
+function mappingAuditContent(item) {
+  return `<section>
+    <p class="eyebrow">${title(item.provider)} event</p>
+    ${auditField("Provider event ID", item.provider_event_id)}
+    ${auditField("Raw title", item.title)}
+    ${auditField("Extracted competition", item.competition)}
+    ${auditField("Normalized competition", item.normalized_competition)}
+    ${auditField("Extracted home", item.home_team)}
+    ${auditField("Normalized home", item.normalized_home_team)}
+    ${auditField("Extracted away", item.away_team)}
+    ${auditField("Normalized away", item.normalized_away_team)}
+    ${auditField("Participant one", item.participant_one)}
+    ${auditField("Normalized participant one", item.normalized_participant_one)}
+    ${auditField("Participant two", item.participant_two)}
+    ${auditField("Normalized participant two", item.normalized_participant_two)}
+    ${auditField("Orientation known", item.orientation_known)}
+    ${auditField("Extraction source", item.extraction_source)}
+    ${auditField("Kickoff Pacific", item.kickoff_time_utc ? dateTime(item.kickoff_time_utc) : null)}
+  </section>
+  <section>
+    <p class="eyebrow">${item.matched ? "Matched" : "Closest"} OddsPapi fixture</p>
+    ${auditField("Sportsbook event ID", item.sportsbook_event_id)}
+    ${auditField("Raw title", item.sportsbook_title)}
+    ${auditField("Competition", item.sportsbook_competition)}
+    ${auditField("Home team", item.sportsbook_home_team)}
+    ${auditField("Away team", item.sportsbook_away_team)}
+    ${auditField("Kickoff Pacific", item.sportsbook_kickoff_time_utc ? dateTime(item.sportsbook_kickoff_time_utc) : null)}
+    ${auditField("Match confidence", item.match_confidence)}
+    ${auditField("Weighted score", item.weighted_score)}
+    ${auditField("Runner-up score", item.runner_up_score)}
+    ${auditField("Score breakdown", item.score_breakdown ? Object.entries(item.score_breakdown).map(([key, value]) => `${title(key)}: ${value}`).join(", ") : null)}
+    ${auditField("Rejection reasons", (item.rejection_reasons || []).join(", "))}
+  </section>`;
+}
+
+function persistSelectedMappingKey(value) {
+  try {
+    if (value) sessionStorage.setItem(MAPPING_MODAL_STORAGE_KEY, value);
+    else sessionStorage.removeItem(MAPPING_MODAL_STORAGE_KEY);
+  } catch { /* Storage may be unavailable in restricted browsers. */ }
+}
+
+function renderMappingModal() {
+  if (!state.selectedMappingKey) return;
+  const current = state.eventMatches.find(item => mappingStableKey(item) === state.selectedMappingKey);
+  if (current) state.selectedMappingSnapshot = current;
+  const item = current || state.selectedMappingSnapshot;
+  const modal = $("#mappingAuditModal");
+  modal.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  const status = $("#mappingAuditStatus");
+  status.classList.toggle("hidden", Boolean(current));
+  status.textContent = current ? "" : "This mapping is no longer present in the latest scan. Showing the last available audit data.";
+  if (!item) {
+    $("#mappingAuditTitle").textContent = "Mapping no longer available";
+    $("#mappingAuditSubtitle").textContent = "The saved provider event was not found after this page refresh.";
+    $("#mappingAuditContent").innerHTML = "";
+    return;
+  }
+  $("#mappingAuditTitle").textContent = item.home_team && item.away_team ? `${item.home_team} vs ${item.away_team}` : item.title;
+  $("#mappingAuditSubtitle").textContent = `${title(item.provider)} · ${item.matched ? "Matched" : "Unmatched"} · ${title(item.match_confidence)}`;
+  $("#mappingAuditContent").innerHTML = mappingAuditContent(item);
+}
+
+function openMappingModal(mappingKey) {
+  if (state.selectedCandidateKey) closeCandidateModal();
+  state.selectedMappingKey = mappingKey;
+  state.selectedMappingSnapshot = state.eventMatches.find(item => mappingStableKey(item) === mappingKey) || null;
+  persistSelectedMappingKey(mappingKey);
+  renderMappingModal();
+}
+
+function closeMappingModal() {
+  state.selectedMappingKey = null;
+  state.selectedMappingSnapshot = null;
+  persistSelectedMappingKey(null);
+  $("#mappingAuditModal").classList.add("hidden");
+  document.body.classList.remove("modal-open");
 }
 
 function renderPipeline(discovered) {
@@ -403,7 +432,17 @@ function candidateSection(heading, object) {
   ).join("")}</section>`;
 }
 
-function candidateDetails(candidate) {
+function candidateStableKey(candidate) {
+  const prediction = candidate.prediction_quote;
+  const sportsbook = candidate.sportsbook_quote;
+  return JSON.stringify([
+    prediction.provider, prediction.provider_event_id, prediction.provider_market_id,
+    prediction.market_type, prediction.selection, prediction.line, prediction.participant,
+    sportsbook.provider_event_id, sportsbook.bookmaker_id
+  ]);
+}
+
+function candidateAuditContent(candidate) {
   const decision = {
     accepted: candidate.accepted,
     edge_percentage_points: candidate.edge_percentage_points,
@@ -411,16 +450,56 @@ function candidateDetails(candidate) {
     evaluated_at: candidate.evaluated_at,
     rejection_reasons: candidate.rejection_reasons,
   };
-  return `<details class="audit-details candidate-details">
-    <summary>Inspect all candidate data</summary>
-    <div class="audit-comparison candidate-audit">
-      ${candidateSection("Decision", decision)}
-      ${candidateSection("Liquidity qualification", candidate.liquidity)}
-      ${candidateSection("Prediction-market quote", candidate.prediction_quote)}
-      ${candidateSection("Sportsbook quote", candidate.sportsbook_quote)}
-      ${candidateSection("Prediction order book", candidate.order_book)}
-    </div>
-  </details>`;
+  return `${candidateSection("Decision", decision)}
+    ${candidateSection("Liquidity qualification", candidate.liquidity)}
+    ${candidateSection("Prediction-market quote", candidate.prediction_quote)}
+    ${candidateSection("Sportsbook quote", candidate.sportsbook_quote)}
+    ${candidateSection("Prediction order book", candidate.order_book)}`;
+}
+
+function persistSelectedCandidateKey(value) {
+  try {
+    if (value) sessionStorage.setItem(CANDIDATE_MODAL_STORAGE_KEY, value);
+    else sessionStorage.removeItem(CANDIDATE_MODAL_STORAGE_KEY);
+  } catch { /* Browser storage may be unavailable; in-memory state still works. */ }
+}
+
+function renderCandidateModal() {
+  if (!state.selectedCandidateKey) return;
+  const current = state.candidates.find(candidate => candidateStableKey(candidate) === state.selectedCandidateKey);
+  if (current) state.selectedCandidateSnapshot = current;
+  const candidate = current || state.selectedCandidateSnapshot;
+  const modal = $("#candidateAuditModal");
+  modal.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  const status = $("#candidateAuditStatus");
+  status.classList.toggle("hidden", Boolean(current));
+  status.textContent = current ? "" : "This candidate is no longer present in the latest scan. Showing the last available audit data.";
+  if (!candidate) {
+    $("#candidateAuditTitle").textContent = "Candidate no longer available";
+    $("#candidateAuditSubtitle").textContent = "The saved candidate was not found after this page refresh.";
+    $("#candidateAuditContent").innerHTML = "";
+    return;
+  }
+  $("#candidateAuditTitle").textContent = `${candidate.prediction_quote.home_team} vs ${candidate.prediction_quote.away_team}`;
+  $("#candidateAuditSubtitle").textContent = `${title(candidate.prediction_quote.provider)} · ${title(candidate.prediction_quote.market_type)} · ${candidate.sportsbook_quote.bookmaker_display_name}`;
+  $("#candidateAuditContent").innerHTML = candidateAuditContent(candidate);
+}
+
+function openCandidateModal(candidateKey) {
+  if (state.selectedMappingKey) closeMappingModal();
+  state.selectedCandidateKey = candidateKey;
+  state.selectedCandidateSnapshot = state.candidates.find(candidate => candidateStableKey(candidate) === candidateKey) || null;
+  persistSelectedCandidateKey(candidateKey);
+  renderCandidateModal();
+}
+
+function closeCandidateModal() {
+  state.selectedCandidateKey = null;
+  state.selectedCandidateSnapshot = null;
+  persistSelectedCandidateKey(null);
+  $("#candidateAuditModal").classList.add("hidden");
+  document.body.classList.remove("modal-open");
 }
 
 function renderCandidates() {
@@ -445,9 +524,11 @@ function renderCandidates() {
       <div><small>Calculated edge</small><strong class="${Number(c.edge_percentage_points) >= 0 ? "positive" : ""}">${Number(c.edge_percentage_points) >= 0 ? "+" : ""}${number(c.edge_percentage_points, 2)} pp</strong></div>
       <div><small>Configured threshold</small><strong>${number(c.configured_threshold, 2)} pp</strong></div>
     </div>
-    ${candidateDetails(c)}
+    <button class="text-button candidate-audit-button" type="button" data-candidate-audit="${esc(candidateStableKey(c))}">Inspect full audit →</button>
   </article>`).join("") ||
     `<div class="empty-state"><span>◇</span><h3>No candidates match</h3><p>Adjust the decision filters.</p></div>`;
+  $$('[data-candidate-audit]').forEach(button => button.addEventListener("click", () => openCandidateModal(button.dataset.candidateAudit)));
+  renderCandidateModal();
 }
 
 function renderHealth() {
@@ -506,6 +587,14 @@ $("#unmatchedSearch").addEventListener("input", () => {
   renderUnmatchedEvents();
 });
 $("#candidateSearch").addEventListener("input", renderCandidates);
+$("#candidateAuditClose").addEventListener("click", closeCandidateModal);
+$("#candidateAuditBackdrop").addEventListener("click", closeCandidateModal);
+$("#mappingAuditClose").addEventListener("click", closeMappingModal);
+$("#mappingAuditBackdrop").addEventListener("click", closeMappingModal);
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && !$("#candidateAuditModal").classList.contains("hidden")) closeCandidateModal();
+  if (event.key === "Escape" && !$("#mappingAuditModal").classList.contains("hidden")) closeMappingModal();
+});
 $("#matchedPrevious").addEventListener("click", () => {
   state.matchedPage = Math.max(1, state.matchedPage - 1);
   renderMatchedEvents();

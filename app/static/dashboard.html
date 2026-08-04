@@ -185,6 +185,30 @@
     <button data-view="health"><span>⌁</span>System</button>
   </nav>
 
+  <div class="audit-modal hidden" id="mappingAuditModal" role="dialog" aria-modal="true" aria-labelledby="mappingAuditTitle">
+    <button class="audit-modal-backdrop" id="mappingAuditBackdrop" type="button" aria-label="Close event mapping audit"></button>
+    <section class="audit-modal-panel">
+      <header class="audit-modal-header">
+        <div><p class="eyebrow">Event mapping audit</p><h2 id="mappingAuditTitle">Provider event mapping</h2><p id="mappingAuditSubtitle"></p></div>
+        <button class="audit-modal-close" id="mappingAuditClose" type="button" aria-label="Close event mapping audit">×</button>
+      </header>
+      <div class="audit-modal-status hidden" id="mappingAuditStatus"></div>
+      <div class="audit-comparison" id="mappingAuditContent"></div>
+    </section>
+  </div>
+
+  <div class="audit-modal hidden" id="candidateAuditModal" role="dialog" aria-modal="true" aria-labelledby="candidateAuditTitle">
+    <button class="audit-modal-backdrop" id="candidateAuditBackdrop" type="button" aria-label="Close candidate audit"></button>
+    <section class="audit-modal-panel">
+      <header class="audit-modal-header">
+        <div><p class="eyebrow">Candidate audit</p><h2 id="candidateAuditTitle">Market candidate</h2><p id="candidateAuditSubtitle"></p></div>
+        <button class="audit-modal-close" id="candidateAuditClose" type="button" aria-label="Close candidate audit">×</button>
+      </header>
+      <div class="audit-modal-status hidden" id="candidateAuditStatus"></div>
+      <div class="audit-comparison candidate-audit" id="candidateAuditContent"></div>
+    </section>
+  </div>
+
   <div class="toast hidden" id="toast" role="status"></div>
   <script src="/static/dashboard.js" defer></script>
 </body>

@@ -55,6 +55,13 @@ def test_telegram_formatting() -> None:
     assert " UTC" not in message
     assert "Depth within 4.5 cents of midpoint" in message
     assert "Pregame timing: PASSED" in message
+    assert f"Value side: Sportsbook — {item.bookmaker_display_name}" in message
+    assert (
+        "Reference probability: Prediction market — "
+        f"{item.prediction_market_provider.value.title()} "
+        f"({item.prediction_market_best_ask:.1%})"
+    ) in message
+    assert "this is not a signal to buy the prediction-market YES contract" in message
 
 
 @pytest.mark.asyncio
