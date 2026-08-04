@@ -51,7 +51,6 @@ Every variable is also present in `.env.example`.
 | Variable | Meaning / default |
 |---|---|
 | `APP_ENV` | Environment name (`development`) |
-| `DASHBOARD_UI` | Dashboard selection: `simple` (default) or preserved `full` UI |
 | `APP_MODE` | Application orchestration mode (`mock` or `live`) |
 | `MOCK_MODE` | Deterministic providers; no credentials (`true`) |
 | `DATABASE_URL` | SQLAlchemy async PostgreSQL URL |
@@ -91,11 +90,35 @@ Every variable is also present in `.env.example`.
 | `REALERT_EDGE_INCREASE_PP` | Early re-alert edge improvement (`1.0`) |
 | `PRICE_POLL_INTERVAL_SECONDS` | Recurring scan interval (`30`) |
 | `PROVIDER_REQUEST_CONCURRENCY` | Maximum simultaneous provider pricing requests (`8`) |
+| `AUTO_START_STOP_ENABLED` | Enable daily automatic scan start/stop (`false`) |
+| `SCAN_AUTO_START_TIME` | Daily automatic start in `CLIENT_TIMEZONE`, `HH:MM` (`06:00`) |
+| `SCAN_AUTO_STOP_TIME` | Daily automatic stop in `CLIENT_TIMEZONE`, `HH:MM` (`23:00`) |
 | `EVENT_MATCH_KICKOFF_TOLERANCE_MINUTES` | Cross-provider kickoff tolerance. controls the maximum kickoff-time difference allowed when determining whether two providers refer to the same event. (`15`) |
 | `EVENT_MATCH_FUZZY_MIN_SCORE` | Minimum weighted score for a manual-review candidate (`80`) |
 | `EVENT_MATCH_AMBIGUITY_MARGIN` | Minimum lead over the runner-up candidate (`5`) |
 
 Secrets are never returned by `/settings` or printed by commands.
+
+### Scanner run control
+
+The dashboard provides manual **Start** and **Stop** controls. The same controls are
+available through `POST /scanner/start` and `POST /scanner/stop`; current status is
+returned by `GET /scanner/control` and `/health`. A stop request never cancels a scan
+already in progress. That scan completes and its snapshot is persisted, but no next
+scan starts.
+
+Set `AUTO_START_STOP_ENABLED=true` to apply the daily start and stop times in
+`CLIENT_TIMEZONE`. Overnight windows are supported (for example, start `20:00`, stop
+`06:00`). A manual choice remains active until the next automatic schedule boundary.
+In live mode the control state is retained in Redis across application restarts.
+
+The System page also allows the operational thresholds, freshness/liquidity rules,
+matching tolerances, polling interval, provider concurrency, and automatic schedule
+to be edited without rebuilding or restarting the application. Updates use
+`PATCH /settings`, are validated before being applied, and are stored in Redis in
+live mode. Environment values provide the initial defaults. Credentials, provider
+URLs, Telegram destinations, and database/Redis connection details are never
+runtime-editable or returned by this endpoint.
 
 Sport is a first-class field on canonical events, prediction quotes,
 sportsbook quotes, opportunities, API filters, alerts, and the dashboard.

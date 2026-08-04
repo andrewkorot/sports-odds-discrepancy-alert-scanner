@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import time
 from decimal import Decimal
 from functools import lru_cache
 from typing import Annotated
@@ -8,12 +9,37 @@ from zoneinfo import ZoneInfo
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+RUNTIME_SETTING_KEYS = frozenset(
+    {
+        "min_kalshi_ask_size",
+        "min_polymarket_ask_size",
+        "discovery_calendar_days",
+        "alert_cooldown_minutes",
+        "realert_edge_increase_pp",
+        "min_minutes_before_kickoff",
+        "event_match_kickoff_tolerance_minutes",
+        "max_prediction_price_age_seconds",
+        "max_sportsbook_price_age_seconds",
+        "max_bid_ask_spread_cents",
+        "depth_window_from_midpoint_cents",
+        "min_depth_within_window_usd",
+        "min_trailing_24h_volume_usd",
+        "edge_threshold_pp",
+        "price_poll_interval_seconds",
+        "provider_request_concurrency",
+        "auto_start_stop_enabled",
+        "scan_auto_start_time",
+        "scan_auto_stop_time",
+        "event_match_fuzzy_min_score",
+        "event_match_ambiguity_margin",
+    }
+)
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
     app_env: str = "development"
-    dashboard_ui: str = "simple"
     app_mode: str = "mock"
     mock_mode: bool = True
     database_url: str = "postgresql+asyncpg://scanner:scanner@postgres:5432/scanner"
@@ -35,11 +61,14 @@ class Settings(BaseSettings):
     sports_odds_mode: str = "mock"
     live_dry_run: bool = True
     alerts_enabled: bool = False
-    price_poll_interval_seconds: int = 30
+    price_poll_interval_seconds: int = Field(default=30, ge=5, le=86400)
+    auto_start_stop_enabled: bool = False
+    scan_auto_start_time: time = time(6, 0)
+    scan_auto_stop_time: time = time(23, 0)
     provider_request_concurrency: int = Field(default=8, ge=1, le=32)
-    event_match_kickoff_tolerance_minutes: int = 15
-    event_match_fuzzy_min_score: Decimal = Decimal("80")
-    event_match_ambiguity_margin: Decimal = Decimal("5")
+    event_match_kickoff_tolerance_minutes: int = Field(default=15, ge=0, le=180)
+    event_match_fuzzy_min_score: Decimal = Field(default=Decimal("80"), ge=0, le=100)
+    event_match_ambiguity_margin: Decimal = Field(default=Decimal("5"), ge=0, le=100)
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     telegram_client_bot_token: str | None = None
@@ -61,19 +90,19 @@ class Settings(BaseSettings):
         default_factory=lambda: ["moneyline", "total", "spread", "btts"]
     )
     enabled_sports: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["soccer"])
-    max_bid_ask_spread_cents: Decimal = Decimal("5")
-    depth_window_from_midpoint_cents: Decimal = Decimal("3")
-    min_depth_within_window_usd: Decimal = Decimal("2000")
-    min_trailing_24h_volume_usd: Decimal = Decimal("5000")
-    edge_threshold_pp: Decimal = Decimal("3.0")
-    max_prediction_price_age_seconds: int = 20
-    max_sportsbook_price_age_seconds: int = 60
-    min_kalshi_ask_size: Decimal = Decimal("100")
-    min_polymarket_ask_size: Decimal = Decimal("100")
-    min_minutes_before_kickoff: int = 10
+    max_bid_ask_spread_cents: Decimal = Field(default=Decimal("5"), ge=0)
+    depth_window_from_midpoint_cents: Decimal = Field(default=Decimal("3"), ge=0)
+    min_depth_within_window_usd: Decimal = Field(default=Decimal("2000"), ge=0)
+    min_trailing_24h_volume_usd: Decimal = Field(default=Decimal("5000"), ge=0)
+    edge_threshold_pp: Decimal = Field(default=Decimal("3.0"), ge=0)
+    max_prediction_price_age_seconds: int = Field(default=20, ge=1)
+    max_sportsbook_price_age_seconds: int = Field(default=60, ge=1)
+    min_kalshi_ask_size: Decimal = Field(default=Decimal("100"), ge=0)
+    min_polymarket_ask_size: Decimal = Field(default=Decimal("100"), ge=0)
+    min_minutes_before_kickoff: int = Field(default=10, ge=0)
     discovery_calendar_days: int = Field(default=3, ge=1)
-    alert_cooldown_minutes: int = 10
-    realert_edge_increase_pp: Decimal = Decimal("1.0")
+    alert_cooldown_minutes: int = Field(default=10, ge=0)
+    realert_edge_increase_pp: Decimal = Field(default=Decimal("1.0"), ge=0)
 
     @field_validator("enabled_bookmakers", "enabled_market_types", "enabled_sports", mode="before")
     @classmethod
@@ -90,19 +119,17 @@ class Settings(BaseSettings):
         ZoneInfo(value)
         return value
 
+    @model_validator(mode="after")
+    def validate_scan_schedule(self) -> Settings:
+        if self.scan_auto_start_time == self.scan_auto_stop_time:
+            raise ValueError("SCAN_AUTO_START_TIME and SCAN_AUTO_STOP_TIME must differ")
+        return self
+
     @field_validator("app_mode")
     @classmethod
     def validate_app_mode(cls, value: str) -> str:
         if value not in {"mock", "live"}:
             raise ValueError("APP_MODE must be mock or live")
-        return value
-
-    @field_validator("dashboard_ui")
-    @classmethod
-    def validate_dashboard_ui(cls, value: str) -> str:
-        value = value.casefold()
-        if value not in {"simple", "full"}:
-            raise ValueError("DASHBOARD_UI must be simple or full")
         return value
 
     @field_validator("kalshi_mode", "polymarket_mode", "sports_odds_mode")

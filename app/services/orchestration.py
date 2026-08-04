@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from contextlib import suppress
 from datetime import UTC, datetime, time, timedelta
 from time import perf_counter
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.core.config import Settings
+from app.core.config import RUNTIME_SETTING_KEYS, Settings
 from app.db.session import create_engine_and_session
 from app.domain.enums import Provider
 from app.providers.base import PredictionMarketConnector
@@ -27,6 +29,8 @@ from app.services.live_pipeline import collect_live_snapshot
 from app.services.scanner import ScannerState
 
 logger = logging.getLogger("uvicorn.error")
+SCAN_CONTROL_REDIS_KEY = "scanner:run-control"
+RUNTIME_SETTINGS_REDIS_KEY = "scanner:runtime-settings"
 
 
 class SportsConnector(Protocol):
@@ -47,9 +51,13 @@ class ScanOrchestrator:
         self.sports_connector: SportsOddsConnector | None = None
         self._task: asyncio.Task[None] | None = None
         self._stopping = asyncio.Event()
+        self._control_changed = asyncio.Event()
         self._health: dict[Provider, ProviderHealthRecord] = {}
         self.last_scan_error: str | None = None
         self.scan_in_progress = False
+        self.scanning_enabled = True
+        self.scan_control_source = "startup"
+        self._schedule_phase: bool | None = None
         self._engine: AsyncEngine | None = None
         self._redis: Redis | None = None
         self.repository: LiveScanRepository | None = None
@@ -111,21 +119,171 @@ class ScanOrchestrator:
         )
 
     async def start(self) -> None:
+        await self._load_runtime_settings()
+        await self._initialize_run_control()
         self._task = asyncio.create_task(self._run(), name="scanner-poll-loop")
 
     async def _run(self) -> None:
         while not self._stopping.is_set():
-            self.scan_in_progress = True
+            await self._apply_schedule_transition()
+            if self.scanning_enabled:
+                self.scan_in_progress = True
+                try:
+                    await self.scan_once()
+                finally:
+                    self.scan_in_progress = False
+            delay = float(
+                self.settings.price_poll_interval_seconds
+                if self.scanning_enabled
+                else min(self.settings.price_poll_interval_seconds, 30)
+            )
+            if self.settings.auto_start_stop_enabled:
+                delay = min(delay, self._seconds_until_schedule_boundary(self.scanner.clock.now()))
             try:
-                await self.scan_once()
-            finally:
-                self.scan_in_progress = False
-            try:
-                await asyncio.wait_for(
-                    self._stopping.wait(), timeout=self.settings.price_poll_interval_seconds
-                )
+                await asyncio.wait_for(self._control_changed.wait(), timeout=delay)
             except TimeoutError:
-                continue
+                pass
+            finally:
+                self._control_changed.clear()
+
+    def schedule_active_at(self, moment: datetime) -> bool:
+        """Return whether a local wall-clock time falls inside the daily scan window."""
+        local_time = (
+            moment.astimezone(ZoneInfo(self.settings.client_timezone)).time().replace(tzinfo=None)
+        )
+        start = self.settings.scan_auto_start_time
+        stop = self.settings.scan_auto_stop_time
+        if start < stop:
+            return start <= local_time < stop
+        return local_time >= start or local_time < stop
+
+    def _seconds_until_schedule_boundary(self, moment: datetime) -> float:
+        zone = ZoneInfo(self.settings.client_timezone)
+        local_now = moment.astimezone(zone)
+        boundary_time = (
+            self.settings.scan_auto_stop_time
+            if self.schedule_active_at(moment)
+            else self.settings.scan_auto_start_time
+        )
+        boundary = datetime.combine(local_now.date(), boundary_time, tzinfo=zone)
+        if boundary <= local_now:
+            boundary += timedelta(days=1)
+        return max(0.1, (boundary.astimezone(UTC) - moment.astimezone(UTC)).total_seconds())
+
+    async def _initialize_run_control(self) -> None:
+        current_phase = self.schedule_active_at(self.scanner.clock.now())
+        self._schedule_phase = current_phase
+        restored = await self._load_run_control()
+        if restored is not None:
+            enabled, stored_phase = restored
+            if not self.settings.auto_start_stop_enabled or stored_phase == current_phase:
+                self.scanning_enabled = enabled
+                self.scan_control_source = "restored"
+                return
+        if self.settings.auto_start_stop_enabled:
+            self.scanning_enabled = current_phase
+            self.scan_control_source = "schedule"
+        await self._persist_run_control()
+
+    async def _apply_schedule_transition(self) -> None:
+        if not self.settings.auto_start_stop_enabled:
+            return
+        current_phase = self.schedule_active_at(self.scanner.clock.now())
+        if self._schedule_phase == current_phase:
+            return
+        self._schedule_phase = current_phase
+        self.scanning_enabled = current_phase
+        self.scan_control_source = "schedule"
+        await self._persist_run_control()
+        logger.info("scanner.schedule.%s", "started" if current_phase else "stopped")
+
+    async def manual_start(self) -> None:
+        self.scanning_enabled = True
+        self.scan_control_source = "manual"
+        await self._persist_run_control()
+        self._control_changed.set()
+
+    async def manual_stop(self) -> None:
+        """Prevent another scan from starting without cancelling the current scan."""
+        self.scanning_enabled = False
+        self.scan_control_source = "manual"
+        await self._persist_run_control()
+        self._control_changed.set()
+
+    async def update_runtime_settings(self, updates: dict[str, object]) -> dict[str, object]:
+        unknown = set(updates) - RUNTIME_SETTING_KEYS
+        if unknown:
+            raise ValueError(f"Settings are not runtime-editable: {', '.join(sorted(unknown))}")
+        validated = Settings.model_validate({**self.settings.model_dump(), **updates})
+        for key in updates:
+            setattr(self.settings, key, getattr(validated, key))
+        await self._persist_runtime_settings()
+        schedule_keys = {
+            "auto_start_stop_enabled",
+            "scan_auto_start_time",
+            "scan_auto_stop_time",
+        }
+        if schedule_keys.intersection(updates):
+            self._schedule_phase = None
+            await self._apply_schedule_transition()
+        self._control_changed.set()
+        return self.runtime_settings()
+
+    def runtime_settings(self) -> dict[str, object]:
+        return {key: getattr(self.settings, key) for key in sorted(RUNTIME_SETTING_KEYS)}
+
+    async def _load_runtime_settings(self) -> None:
+        if self._redis is None:
+            return
+        try:
+            raw = await self._redis.get(RUNTIME_SETTINGS_REDIS_KEY)
+            if not raw:
+                return
+            values = json.loads(raw)
+            if not isinstance(values, dict):
+                return
+            validated = Settings.model_validate({**self.settings.model_dump(), **values})
+            for key in RUNTIME_SETTING_KEYS:
+                if key in values:
+                    setattr(self.settings, key, getattr(validated, key))
+        except Exception:
+            logger.warning("scanner.runtime_settings.load_failed")
+
+    async def _persist_runtime_settings(self) -> None:
+        if self._redis is None:
+            return
+        try:
+            await self._redis.set(
+                RUNTIME_SETTINGS_REDIS_KEY,
+                json.dumps(self.runtime_settings(), default=str),
+            )
+        except Exception:
+            logger.warning("scanner.runtime_settings.persistence_failed")
+
+    async def _load_run_control(self) -> tuple[bool, bool] | None:
+        if self._redis is None:
+            return None
+        try:
+            raw = await self._redis.get(SCAN_CONTROL_REDIS_KEY)
+            if not raw:
+                return None
+            value = json.loads(raw)
+            return bool(value["enabled"]), bool(value["schedule_phase"])
+        except Exception:
+            return None
+
+    async def _persist_run_control(self) -> None:
+        if self._redis is None:
+            return
+        try:
+            await self._redis.set(
+                SCAN_CONTROL_REDIS_KEY,
+                json.dumps(
+                    {"enabled": self.scanning_enabled, "schedule_phase": self._schedule_phase}
+                ),
+            )
+        except Exception:
+            logger.warning("scanner.run_control.persistence_failed")
 
     async def scan_once(self) -> None:
         if self.settings.app_mode == "mock" and self.settings.mock_mode:

@@ -44,15 +44,16 @@ async def test_dashboard_and_static_assets(client: AsyncClient) -> None:
     script = await client.get("/static/dashboard.js")
 
     assert dashboard.status_code == 200
-    assert "Price Discrepancy Scanner" in dashboard.text
-    assert 'id="opportunities"' in dashboard.text
-    assert 'id="matched"' in dashboard.text
-    assert 'id="unmatched"' in dashboard.text
-    assert 'id="opportunitySearch"' in dashboard.text
+    assert "PitchEdge" in dashboard.text
+    assert 'id="topOpportunities"' in dashboard.text
+    assert 'id="matchedList"' in dashboard.text
+    assert 'id="unmatchedList"' in dashboard.text
+    assert 'id="opSearch"' in dashboard.text
     assert 'id="matchedPagination"' in dashboard.text
-    assert 'id="unmatchedProvider"' in dashboard.text
+    assert 'id="unmatchedProviderFilter"' in dashboard.text
+    assert 'id="candidateSearch"' in dashboard.text
     assert stylesheet.status_code == 200
-    assert ".table-wrap" in stylesheet.text
+    assert ".audit-modal" in stylesheet.text
     assert script.status_code == 200
     assert 'get("/opportunities")' in script.text
     assert 'get("/event-matches")' in script.text
@@ -60,24 +61,20 @@ async def test_dashboard_and_static_assets(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_full_dashboard_can_be_reenabled() -> None:
-    app = create_app(Settings(dashboard_ui="full"))
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
-        response = await client.get("/")
+async def test_runtime_settings_can_be_updated_without_exposing_secrets(
+    client: AsyncClient,
+) -> None:
+    response = await client.patch(
+        "/settings",
+        json={"price_poll_interval_seconds": 125, "edge_threshold_pp": 4.25},
+    )
+    assert response.status_code == 200
+    assert response.json()["price_poll_interval_seconds"] == 125
+    current = (await client.get("/settings")).json()
+    assert current["edge_threshold_pp"] == "4.25"
 
-        assert response.status_code == 200
-        assert 'id="matchedSearch"' in response.text
-        assert 'id="unmatchedSearch"' in response.text
-        assert 'id="candidateSearch"' in response.text
-        script = await client.get("/static/dashboard.js")
-        assert "Inspect all candidate data" in script.text
-        assert 'candidateSection("Prediction-market quote"' in script.text
-        assert 'candidateSection("Sportsbook quote"' in script.text
-    assert "PitchEdge" in response.text
-    assert 'id="matchedList"' in response.text
+    forbidden = await client.patch("/settings", json={"database_url": "not-allowed"})
+    assert forbidden.status_code == 422
 
 
 @pytest.mark.asyncio

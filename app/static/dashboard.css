@@ -85,6 +85,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
   text-transform: uppercase;
 }
 .mode-pill { color: var(--brand); background: var(--brand-soft); border: 1px solid #cde6d9; }
+.scan-control-button { min-height: 35px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; font-size: 10px; font-weight: 750; }
+.scan-control-button.start { color: var(--brand); }
+.scan-control-button.stop { color: var(--danger); }
+.scan-control-button:disabled { color: #aeb5b2; background: var(--surface-soft); cursor: default; }
 .icon-button {
   width: 35px;
   height: 35px;
@@ -333,9 +337,16 @@ tbody tr:hover { background: #fbfcfb; }
 .health-stat strong { display: block; margin-top: 4px; font-size: 12px; }
 .settings-panel { margin-top: 12px; }
 .settings-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+.settings-note { margin-top: 4px; color: var(--muted); font-size: 9px; }
+.settings-actions { display: flex; align-items: center; gap: 10px; }
+.settings-actions button { min-height: 34px; padding: 0 12px; border: 0; border-radius: 8px; color: white; background: var(--brand); cursor: pointer; font-size: 10px; font-weight: 750; }
+.settings-actions button:disabled { color: #aeb5b2; background: var(--surface-soft); cursor: default; }
 .setting { padding: 12px; background: var(--surface-soft); border-radius: 9px; }
 .setting small { display: block; color: var(--muted); font-size: 8px; text-transform: uppercase; letter-spacing: .4px; }
 .setting strong { display: block; font-size: 11px; margin-top: 5px; word-break: break-word; }
+.setting input[type="number"], .setting input[type="time"] { width: 100%; min-height: 34px; margin-top: 7px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: var(--surface); font-size: 11px; }
+.setting-toggle { display: flex; align-items: center; gap: 8px; min-height: 34px; margin-top: 7px; font-size: 10px; font-weight: 700; }
+.setting-toggle input { width: 16px; height: 16px; accent-color: var(--brand); }
 .skeleton { position: relative; overflow: hidden; background: #edf0ee; border-radius: 11px; }
 .skeleton:after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.65), transparent); animation: shimmer 1.4s infinite; }
 @keyframes shimmer { to { transform: translateX(100%); } }
@@ -407,6 +418,8 @@ tbody tr:hover { background: #fbfcfb; }
   .unmatched-panel .panel-heading { align-items: flex-start; }
   .audit-tools { align-items: flex-end; flex-direction: column-reverse; }
   .settings-grid { grid-template-columns: 1fr 1fr; }
+  .settings-panel .panel-heading { align-items: flex-start; }
+  .settings-actions { align-items: flex-end; flex-direction: column; }
   .panel { padding: 16px; }
   .mobile-nav {
     position: fixed;

@@ -3,7 +3,9 @@ const CANDIDATE_MODAL_STORAGE_KEY = "scannerSelectedCandidateKey";
 const MAPPING_MODAL_STORAGE_KEY = "scannerSelectedMappingKey";
 const storedCandidateKey = (() => { try { return sessionStorage.getItem(CANDIDATE_MODAL_STORAGE_KEY); } catch { return null; } })();
 const storedMappingKey = (() => { try { return sessionStorage.getItem(MAPPING_MODAL_STORAGE_KEY); } catch { return null; } })();
-const state = { health: null, providers: [], events: [], eventMatches: [], bookmakers: [], opportunities: [], candidates: [], markets: [], settings: {}, matchedPage: 1, matchedPageSize: 8, unmatchedPage: 1, unmatchedPageSize: 8, refreshTimer: null, selectedCandidateKey: storedCandidateKey, selectedCandidateSnapshot: null, selectedMappingKey: storedMappingKey, selectedMappingSnapshot: null };
+const state = { health: null, providers: [], events: [], eventMatches: [], bookmakers: [], opportunities: [], candidates: [], markets: [], settings: {}, settingsDirty: false, matchedPage: 1, matchedPageSize: 8, unmatchedPage: 1, unmatchedPageSize: 8, refreshTimer: null, selectedCandidateKey: storedCandidateKey, selectedCandidateSnapshot: null, selectedMappingKey: storedMappingKey, selectedMappingSnapshot: null };
+const RUNTIME_SETTING_KEYS = ["min_kalshi_ask_size","min_polymarket_ask_size","discovery_calendar_days","alert_cooldown_minutes","realert_edge_increase_pp","min_minutes_before_kickoff","event_match_kickoff_tolerance_minutes","max_prediction_price_age_seconds","max_sportsbook_price_age_seconds","max_bid_ask_spread_cents","depth_window_from_midpoint_cents","min_depth_within_window_usd","min_trailing_24h_volume_usd","edge_threshold_pp","price_poll_interval_seconds","provider_request_concurrency","auto_start_stop_enabled","scan_auto_start_time","scan_auto_stop_time","event_match_fuzzy_min_score","event_match_ambiguity_margin"];
+const INTEGER_RUNTIME_SETTINGS = new Set(["discovery_calendar_days","alert_cooldown_minutes","min_minutes_before_kickoff","event_match_kickoff_tolerance_minutes","max_prediction_price_age_seconds","max_sportsbook_price_age_seconds","price_poll_interval_seconds","provider_request_concurrency"]);
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -42,6 +44,21 @@ async function get(path) {
   return response.json();
 }
 
+async function post(path) {
+  const response = await fetch(path, { method: "POST", headers: { Accept: "application/json" } });
+  if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+  return response.json();
+}
+
+async function patch(path, payload) {
+  const response = await fetch(path, { method: "PATCH", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.detail || `${path} returned ${response.status}`);
+  }
+  return response.json();
+}
+
 async function refresh(showToast = false) {
   const icon = $("#refreshIcon");
   icon.classList.add("rotating");
@@ -66,6 +83,8 @@ function render() {
   const online = state.providers.filter(p => p.connected);
   const discovered = state.providers.reduce((total, provider) => total + Number(provider.events_discovered || 0), 0);
   $("#modePill").textContent = `${state.settings.app_mode || "mock"} · ${state.settings.live_dry_run ? "dry run" : "alerts"}`;
+  $("#scannerStart").disabled = state.health.scanning_enabled;
+  $("#scannerStop").disabled = !state.health.scanning_enabled;
   $("#lastScan").textContent = age(state.health.last_successful_update);
   $("#opportunityCount").textContent = state.opportunities.length.toLocaleString();
   $("#marketCount").textContent = state.markets.length.toLocaleString();
@@ -289,8 +308,15 @@ function renderPipeline(discovered) {
   const titleEl = $("#pipelineTitle");
   const descriptionEl = $("#pipelineDescription");
   if (state.health.scan_in_progress) {
-    titleEl.textContent = "Scanning for updated prices";
-    descriptionEl.textContent = "The previous completed scan remains visible until discovery, matching, qualification, and persistence finish.";
+    titleEl.textContent = state.health.scanning_enabled ? "Scanning for updated prices" : "Finishing the current scan";
+    descriptionEl.textContent = state.health.scanning_enabled
+      ? "The previous completed scan remains visible until discovery, matching, qualification, and persistence finish."
+      : "Scanning is stopped for future cycles. This in-progress scan will complete safely.";
+    return;
+  }
+  if (!state.health.scanning_enabled) {
+    titleEl.textContent = "Scanning is stopped";
+    descriptionEl.textContent = `No new scan will begin until manual start or the next enabled schedule boundary. Control source: ${title(state.health.scan_control_source)}.`;
     return;
   }
   if (state.health.last_scan_error) {
@@ -540,8 +566,42 @@ function renderHealth() {
 }
 
 function renderSettings() {
-  const keys = ["client_timezone","discovery_calendar_days","enabled_sports","edge_threshold_pp","max_bid_ask_spread_cents","depth_window_from_midpoint_cents","min_depth_within_window_usd","min_trailing_24h_volume_usd","price_poll_interval_seconds","enabled_market_types","live_dry_run","alerts_enabled"];
-  $("#settingsGrid").innerHTML = keys.map(k => `<div class="setting"><small>${title(k)}</small><strong>${esc(Array.isArray(state.settings[k]) ? state.settings[k].map(title).join(", ") : state.settings[k])}</strong></div>`).join("");
+  if (state.settingsDirty) return;
+  $("#settingsGrid").innerHTML = RUNTIME_SETTING_KEYS.map(key => {
+    const value = state.settings[key];
+    let input;
+    if (key === "auto_start_stop_enabled") {
+      input = `<label class="setting-toggle"><input data-runtime-setting="${key}" type="checkbox" ${value ? "checked" : ""}> Enabled</label>`;
+    } else if (key === "scan_auto_start_time" || key === "scan_auto_stop_time") {
+      input = `<input data-runtime-setting="${key}" type="time" value="${esc(String(value).slice(0, 5))}">`;
+    } else {
+      input = `<input data-runtime-setting="${key}" type="number" min="0" step="${INTEGER_RUNTIME_SETTINGS.has(key) ? "1" : "0.1"}" value="${esc(value)}">`;
+    }
+    return `<label class="setting"><small>${title(key)}</small>${input}</label>`;
+  }).join("");
+  $$('[data-runtime-setting]').forEach(input => input.addEventListener("input", () => {
+    state.settingsDirty = true;
+    $("#saveRuntimeSettings").disabled = false;
+  }));
+}
+
+async function saveRuntimeSettings() {
+  const payload = {};
+  $$('[data-runtime-setting]').forEach(input => {
+    const key = input.dataset.runtimeSetting;
+    payload[key] = input.type === "checkbox" ? input.checked : (input.type === "number" ? Number(input.value) : input.value);
+  });
+  $("#saveRuntimeSettings").disabled = true;
+  try {
+    const updated = await patch("/settings", payload);
+    Object.assign(state.settings, updated);
+    state.settingsDirty = false;
+    renderSettings();
+    toast("Runtime settings saved");
+  } catch (error) {
+    $("#saveRuntimeSettings").disabled = false;
+    toast(`Settings update failed: ${error.message}`, true);
+  }
 }
 
 function switchView(view) {
@@ -567,6 +627,20 @@ function scheduleRefresh() {
 $$("[data-view]").forEach(el => el.addEventListener("click", () => switchView(el.dataset.view)));
 $$("[data-jump]").forEach(el => el.addEventListener("click", () => switchView(el.dataset.jump)));
 $("#refreshButton").addEventListener("click", () => refresh(true));
+async function setScannerEnabled(enabled) {
+  $("#scannerStart").disabled = true;
+  $("#scannerStop").disabled = true;
+  try {
+    await post(enabled ? "/scanner/start" : "/scanner/stop");
+    await refresh(true);
+    toast(enabled ? "Scanning started" : "Scanning will stop after the current scan");
+  } catch (error) {
+    toast(`Scanner control failed: ${error.message}`, true);
+  }
+}
+$("#scannerStart").addEventListener("click", () => setScannerEnabled(true));
+$("#scannerStop").addEventListener("click", () => setScannerEnabled(false));
+$("#saveRuntimeSettings").addEventListener("click", saveRuntimeSettings);
 ["opSportFilter","opMarketFilter","opProviderFilter","opBookFilter"].forEach(id => $(`#${id}`).addEventListener("change", renderOpportunityTable));
 $("#opSearch").addEventListener("input", renderOpportunityTable);
 ["candidateSportFilter","candidateStatusFilter","candidateReasonFilter","candidateMarketFilter"].forEach(id => $(`#${id}`).addEventListener("change", renderCandidates));

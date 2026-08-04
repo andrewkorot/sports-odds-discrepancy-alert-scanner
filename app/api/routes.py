@@ -1,9 +1,10 @@
+from datetime import time
 from decimal import Decimal
 from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.models import (
     Bookmaker,
@@ -38,6 +39,9 @@ class HealthResponse(BaseModel):
     last_successful_update: str | None
     last_scan_error: str | None = None
     scan_in_progress: bool = False
+    scanning_enabled: bool = True
+    scan_control_source: str = "startup"
+    auto_start_stop_enabled: bool = False
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -64,7 +68,77 @@ async def health(request: Request) -> HealthResponse:
         last_successful_update=scanner.last_updated.isoformat() if scanner.last_updated else None,
         last_scan_error=orchestrator(request).last_scan_error,
         scan_in_progress=orchestrator(request).scan_in_progress,
+        scanning_enabled=orchestrator(request).scanning_enabled,
+        scan_control_source=orchestrator(request).scan_control_source,
+        auto_start_stop_enabled=scanner.settings.auto_start_stop_enabled,
     )
+
+
+class ScannerControlResponse(BaseModel):
+    scanning_enabled: bool
+    scan_in_progress: bool
+    control_source: str
+    auto_start_stop_enabled: bool
+    auto_start_time: str
+    auto_stop_time: str
+    timezone: str
+
+
+def scanner_control_response(request: Request) -> ScannerControlResponse:
+    controller = orchestrator(request)
+    settings = state(request).settings
+    return ScannerControlResponse(
+        scanning_enabled=controller.scanning_enabled,
+        scan_in_progress=controller.scan_in_progress,
+        control_source=controller.scan_control_source,
+        auto_start_stop_enabled=settings.auto_start_stop_enabled,
+        auto_start_time=settings.scan_auto_start_time.strftime("%H:%M"),
+        auto_stop_time=settings.scan_auto_stop_time.strftime("%H:%M"),
+        timezone=settings.client_timezone,
+    )
+
+
+@router.get("/scanner/control", response_model=ScannerControlResponse)
+async def scanner_control(request: Request) -> ScannerControlResponse:
+    return scanner_control_response(request)
+
+
+@router.post("/scanner/start", response_model=ScannerControlResponse)
+async def start_scanner(request: Request) -> ScannerControlResponse:
+    await orchestrator(request).manual_start()
+    return scanner_control_response(request)
+
+
+@router.post("/scanner/stop", response_model=ScannerControlResponse)
+async def stop_scanner(request: Request) -> ScannerControlResponse:
+    await orchestrator(request).manual_stop()
+    return scanner_control_response(request)
+
+
+class RuntimeSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    min_kalshi_ask_size: Decimal | None = Field(default=None, ge=0)
+    min_polymarket_ask_size: Decimal | None = Field(default=None, ge=0)
+    discovery_calendar_days: int | None = Field(default=None, ge=1)
+    alert_cooldown_minutes: int | None = Field(default=None, ge=0)
+    realert_edge_increase_pp: Decimal | None = Field(default=None, ge=0)
+    min_minutes_before_kickoff: int | None = Field(default=None, ge=0)
+    event_match_kickoff_tolerance_minutes: int | None = Field(default=None, ge=0, le=180)
+    max_prediction_price_age_seconds: int | None = Field(default=None, ge=1)
+    max_sportsbook_price_age_seconds: int | None = Field(default=None, ge=1)
+    max_bid_ask_spread_cents: Decimal | None = Field(default=None, ge=0)
+    depth_window_from_midpoint_cents: Decimal | None = Field(default=None, ge=0)
+    min_depth_within_window_usd: Decimal | None = Field(default=None, ge=0)
+    min_trailing_24h_volume_usd: Decimal | None = Field(default=None, ge=0)
+    edge_threshold_pp: Decimal | None = Field(default=None, ge=0)
+    price_poll_interval_seconds: int | None = Field(default=None, ge=5, le=86400)
+    provider_request_concurrency: int | None = Field(default=None, ge=1, le=32)
+    auto_start_stop_enabled: bool | None = None
+    scan_auto_start_time: time | None = None
+    scan_auto_stop_time: time | None = None
+    event_match_fuzzy_min_score: Decimal | None = Field(default=None, ge=0, le=100)
+    event_match_ambiguity_margin: Decimal | None = Field(default=None, ge=0, le=100)
 
 
 @router.get("/bookmakers", response_model=list[Bookmaker])
@@ -163,7 +237,6 @@ async def settings(request: Request) -> dict[str, object]:
     current = state(request).settings
     return {
         "app_env": current.app_env,
-        "dashboard_ui": current.dashboard_ui,
         "mock_mode": current.mock_mode,
         "enabled_bookmakers": current.enabled_bookmakers,
         "edge_threshold_pp": current.edge_threshold_pp,
@@ -172,6 +245,9 @@ async def settings(request: Request) -> dict[str, object]:
         "min_kalshi_ask_size": current.min_kalshi_ask_size,
         "min_polymarket_ask_size": current.min_polymarket_ask_size,
         "min_minutes_before_kickoff": current.min_minutes_before_kickoff,
+        "event_match_kickoff_tolerance_minutes": (current.event_match_kickoff_tolerance_minutes),
+        "event_match_fuzzy_min_score": current.event_match_fuzzy_min_score,
+        "event_match_ambiguity_margin": current.event_match_ambiguity_margin,
         "discovery_calendar_days": current.discovery_calendar_days,
         "alert_cooldown_minutes": current.alert_cooldown_minutes,
         "realert_edge_increase_pp": current.realert_edge_increase_pp,
@@ -182,6 +258,9 @@ async def settings(request: Request) -> dict[str, object]:
         "live_dry_run": current.live_dry_run,
         "alerts_enabled": current.alerts_enabled,
         "price_poll_interval_seconds": current.price_poll_interval_seconds,
+        "auto_start_stop_enabled": current.auto_start_stop_enabled,
+        "scan_auto_start_time": current.scan_auto_start_time.strftime("%H:%M"),
+        "scan_auto_stop_time": current.scan_auto_stop_time.strftime("%H:%M"),
         "provider_request_concurrency": current.provider_request_concurrency,
         "client_timezone": current.client_timezone,
         "enabled_market_types": current.enabled_market_types,
@@ -191,6 +270,17 @@ async def settings(request: Request) -> dict[str, object]:
         "min_depth_within_window_usd": current.min_depth_within_window_usd,
         "min_trailing_24h_volume_usd": current.min_trailing_24h_volume_usd,
     }
+
+
+@router.patch("/settings")
+async def update_settings(request: Request, update: RuntimeSettingsUpdate) -> dict[str, object]:
+    updates = update.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=422, detail="At least one runtime setting is required")
+    try:
+        return await orchestrator(request).update_runtime_settings(updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/connector-health", response_model=list[ConnectorHealth])

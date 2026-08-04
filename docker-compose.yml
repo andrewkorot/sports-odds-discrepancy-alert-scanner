@@ -30,7 +30,6 @@ services:
       - .env
     environment:
       APP_ENV: ${APP_ENV:-development}
-      DASHBOARD_UI: ${DASHBOARD_UI:-simple}
       APP_MODE: ${APP_MODE:-mock}
       MOCK_MODE: ${MOCK_MODE:-true}
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://scanner:scanner@postgres:5432/scanner}
@@ -49,6 +48,9 @@ services:
       CLIENT_TIMEZONE: ${CLIENT_TIMEZONE:-America/Los_Angeles}
       PRICE_POLL_INTERVAL_SECONDS: ${PRICE_POLL_INTERVAL_SECONDS:-30}
       PROVIDER_REQUEST_CONCURRENCY: ${PROVIDER_REQUEST_CONCURRENCY:-8}
+      AUTO_START_STOP_ENABLED: ${AUTO_START_STOP_ENABLED:-false}
+      SCAN_AUTO_START_TIME: ${SCAN_AUTO_START_TIME:-06:00}
+      SCAN_AUTO_STOP_TIME: ${SCAN_AUTO_STOP_TIME:-23:00}
       LIVE_DRY_RUN: ${LIVE_DRY_RUN:-true}
       ALERTS_ENABLED: ${ALERTS_ENABLED:-false}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}

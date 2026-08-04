@@ -21,6 +21,8 @@
     </nav>
     <div class="header-actions">
       <span class="mode-pill" id="modePill">Loading</span>
+      <button class="scan-control-button start" id="scannerStart" type="button">Start</button>
+      <button class="scan-control-button stop" id="scannerStop" type="button">Stop</button>
       <button class="icon-button" id="refreshButton" title="Refresh now" aria-label="Refresh dashboard">
         <span id="refreshIcon">↻</span>
       </button>
@@ -172,7 +174,7 @@
       <div class="page-heading"><div><p class="eyebrow">Operations</p><h2>System health</h2><p>Provider connectivity, runtime modes, and update telemetry.</p></div></div>
       <div class="health-grid" id="healthGrid"></div>
       <section class="panel settings-panel">
-        <div class="panel-heading"><div><p class="eyebrow">Runtime</p><h3>Scanner policy</h3></div><a href="/docs" target="_blank" class="text-button">API docs ↗</a></div>
+        <div class="panel-heading"><div><p class="eyebrow">Runtime</p><h3>Scanner policy</h3><p class="settings-note">Changes apply to subsequent scan work and persist on the live server.</p></div><div class="settings-actions"><button id="saveRuntimeSettings" type="button" disabled>Save changes</button><a href="/docs" target="_blank" class="text-button">API docs ↗</a></div></div>
         <div class="settings-grid" id="settingsGrid"></div>
       </section>
     </section>
