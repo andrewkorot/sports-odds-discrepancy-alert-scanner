@@ -57,6 +57,10 @@ async def test_dashboard_and_static_assets(client: AsyncClient) -> None:
     assert script.status_code == 200
     assert 'get("/opportunities")' in script.text
     assert 'get("/event-matches")' in script.text
+    assert "sportsbook.selection, sportsbook.line, sportsbook.participant" in script.text
+    assert 'data-candidate-audit="${esc(c.id)}"' in script.text
+    assert "all_candidate_rejection_reasons: reasons" in script.text
+    assert "liquidity_rejection_reasons: candidate.liquidity.rejection_reasons" in script.text
     assert (await client.get("/event-matches")).status_code == 200
 
 

@@ -464,20 +464,32 @@ function candidateStableKey(candidate) {
   return JSON.stringify([
     prediction.provider, prediction.provider_event_id, prediction.provider_market_id,
     prediction.market_type, prediction.selection, prediction.line, prediction.participant,
-    sportsbook.provider_event_id, sportsbook.bookmaker_id
+    sportsbook.provider_event_id, sportsbook.bookmaker_id, sportsbook.market_type,
+    sportsbook.selection, sportsbook.line, sportsbook.participant
   ]);
 }
 
+function candidateRejectionReasons(candidate) {
+  return [...new Set(Array.isArray(candidate.rejection_reasons) ? candidate.rejection_reasons : [])];
+}
+
 function candidateAuditContent(candidate) {
+  const reasons = candidateRejectionReasons(candidate);
   const decision = {
+    candidate_id: candidate.id,
     accepted: candidate.accepted,
     edge_percentage_points: candidate.edge_percentage_points,
     configured_threshold: candidate.configured_threshold,
     evaluated_at: candidate.evaluated_at,
-    rejection_reasons: candidate.rejection_reasons,
+    all_candidate_rejection_reasons: reasons,
   };
+  const liquidity = {
+    ...candidate.liquidity,
+    liquidity_rejection_reasons: candidate.liquidity.rejection_reasons,
+  };
+  delete liquidity.rejection_reasons;
   return `${candidateSection("Decision", decision)}
-    ${candidateSection("Liquidity qualification", candidate.liquidity)}
+    ${candidateSection("Liquidity qualification", liquidity)}
     ${candidateSection("Prediction-market quote", candidate.prediction_quote)}
     ${candidateSection("Sportsbook quote", candidate.sportsbook_quote)}
     ${candidateSection("Prediction order book", candidate.order_book)}`;
@@ -512,11 +524,13 @@ function renderCandidateModal() {
   $("#candidateAuditContent").innerHTML = candidateAuditContent(candidate);
 }
 
-function openCandidateModal(candidateKey) {
+function openCandidateModal(candidateId) {
   if (state.selectedMappingKey) closeMappingModal();
-  state.selectedCandidateKey = candidateKey;
-  state.selectedCandidateSnapshot = state.candidates.find(candidate => candidateStableKey(candidate) === candidateKey) || null;
-  persistSelectedCandidateKey(candidateKey);
+  const candidate = state.candidates.find(item => item.id === candidateId) || null;
+  if (!candidate) return;
+  state.selectedCandidateKey = candidateStableKey(candidate);
+  state.selectedCandidateSnapshot = candidate;
+  persistSelectedCandidateKey(state.selectedCandidateKey);
   renderCandidateModal();
 }
 
@@ -537,11 +551,13 @@ function renderCandidates() {
     c.prediction_quote.provider_event_id, c.prediction_quote.provider_market_id,
     c.prediction_quote.market_type, c.rejection_reasons
   ).includes(search))).slice(0, 120);
-  $("#candidateList").innerHTML = rows.map(c => `<article class="candidate-card">
-    <div><span class="cell-main">${esc(c.prediction_quote.home_team)} vs ${esc(c.prediction_quote.away_team)}</span><span class="cell-sub">${title(c.prediction_quote.sport)} · ${title(c.prediction_quote.provider)} · ${title(c.prediction_quote.market_type)} · ${esc(selectionLabel(c.prediction_quote))}</span></div>
+  $("#candidateList").innerHTML = rows.map(c => {
+    const reasons = candidateRejectionReasons(c);
+    return `<article class="candidate-card" data-candidate-id="${esc(c.id)}">
+    <div><span class="cell-main">${esc(c.prediction_quote.home_team)} vs ${esc(c.prediction_quote.away_team)}</span><span class="cell-sub">${title(c.prediction_quote.sport)} · ${title(c.prediction_quote.provider)} · ${title(c.prediction_quote.market_type)}</span><span class="cell-sub">Prediction: ${esc(selectionLabel(c.prediction_quote))} → Sportsbook: ${esc(selectionLabel(c.sportsbook_quote))} · ${esc(c.sportsbook_quote.bookmaker_display_name)}</span></div>
     <div><span class="cell-sub">Spread</span><span class="cell-main">${c.liquidity.spread_cents == null ? "—" : `${number(c.liquidity.spread_cents,1)}¢`}</span></div>
     <div><span class="cell-sub">Depth</span><span class="cell-main">${money(c.liquidity.total_depth_within_window_usd)}</span></div>
-    <div class="reasons">${c.rejection_reasons.length ? c.rejection_reasons.map(r => `<span class="reason">${title(r)}</span>`).join("") : `<span class="cell-sub">All checks passed</span>`}</div>
+    <div class="reasons">${reasons.length ? reasons.map(r => `<span class="reason">${title(r)}</span>`).join("") : `<span class="cell-sub">All checks passed</span>`}</div>
     <span class="decision ${c.accepted ? "accepted" : ""}">${c.accepted ? "Accepted" : "Rejected"}</span>
     <div class="candidate-edge-inputs">
       <div><small>Prediction ask</small><strong>${pct(c.prediction_quote.best_ask_probability, 2)}</strong></div>
@@ -550,8 +566,9 @@ function renderCandidates() {
       <div><small>Calculated edge</small><strong class="${Number(c.edge_percentage_points) >= 0 ? "positive" : ""}">${Number(c.edge_percentage_points) >= 0 ? "+" : ""}${number(c.edge_percentage_points, 2)} pp</strong></div>
       <div><small>Configured threshold</small><strong>${number(c.configured_threshold, 2)} pp</strong></div>
     </div>
-    <button class="text-button candidate-audit-button" type="button" data-candidate-audit="${esc(candidateStableKey(c))}">Inspect full audit →</button>
-  </article>`).join("") ||
+    <button class="text-button candidate-audit-button" type="button" data-candidate-audit="${esc(c.id)}">Inspect full audit →</button>
+  </article>`;
+  }).join("") ||
     `<div class="empty-state"><span>◇</span><h3>No candidates match</h3><p>Adjust the decision filters.</p></div>`;
   $$('[data-candidate-audit]').forEach(button => button.addEventListener("click", () => openCandidateModal(button.dataset.candidateAudit)));
   renderCandidateModal();
