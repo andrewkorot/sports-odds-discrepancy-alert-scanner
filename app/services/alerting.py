@@ -61,22 +61,7 @@ class AlertCoordinator:
         if not self.delivery_enabled or self.sender is None:
             return 0
         sent = 0
-        best_by_market: dict[tuple[object, ...], Opportunity] = {}
         for opportunity in self.scanner.opportunities:
-            key = (
-                opportunity.canonical_event_id,
-                opportunity.market_type,
-                opportunity.selection,
-                opportunity.line,
-                opportunity.participant,
-            )
-            previous = best_by_market.get(key)
-            if (
-                previous is None
-                or opportunity.edge_percentage_points > previous.edge_percentage_points
-            ):
-                best_by_market[key] = opportunity
-        for opportunity in best_by_market.values():
             if await self.deduplicator.should_alert(
                 opportunity,
                 timedelta(minutes=self.settings.alert_cooldown_minutes),

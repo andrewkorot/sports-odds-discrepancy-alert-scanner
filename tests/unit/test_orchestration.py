@@ -2,6 +2,7 @@ from datetime import UTC, datetime, time
 from decimal import Decimal
 
 from app.core.config import Settings
+from app.services.alert_deduplication import deduplication_key
 from app.services.alert_formatter import MockTelegramSender
 from app.services.alerting import AlertCoordinator
 from app.services.clock import FrozenClock
@@ -37,17 +38,10 @@ async def test_enabled_delivery_is_deduplicated() -> None:
     await scanner.refresh()
     sender = MockTelegramSender()
     coordinator = AlertCoordinator(settings, scanner, sender)
-    expected_markets = {
-        (
-            item.canonical_event_id,
-            item.market_type,
-            item.selection,
-            item.line,
-            item.participant,
-        )
-        for item in scanner.opportunities
-    }
-    assert await coordinator.process() == len(expected_markets)
+    expected_pairs = {deduplication_key(item) for item in scanner.opportunities}
+    assert await coordinator.process() == len(expected_pairs)
+    assert any("Prediction market: Kalshi" in message for message in sender.messages)
+    assert any("Prediction market: Polymarket" in message for message in sender.messages)
     assert await coordinator.process() == 0
 
 
