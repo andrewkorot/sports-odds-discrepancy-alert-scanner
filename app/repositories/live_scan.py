@@ -314,6 +314,7 @@ class LiveScanRepository:
                     snapshot_id=snapshot_rows[prediction.provider_market_id].id,
                     accepted=candidate.accepted,
                     edge_percentage_points=candidate.edge_percentage_points,
+                    configured_threshold=candidate.configured_threshold,
                     rejection_reasons=candidate.rejection_reasons,
                     liquidity_qualification=candidate.liquidity.model_dump(mode="json"),
                     evaluated_at=candidate.evaluated_at,

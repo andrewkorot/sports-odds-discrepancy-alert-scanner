@@ -106,6 +106,25 @@ class MockTelegramSender:
         self.messages.append(message)
 
 
+class FanoutTelegramSender:
+    """Attempt delivery to every configured Telegram destination."""
+
+    def __init__(self, senders: Sequence[TelegramSender]) -> None:
+        self._senders = list(senders)
+
+    async def send(self, message: str) -> None:
+        failures: list[Exception] = []
+        for sender in self._senders:
+            try:
+                await sender.send(message)
+            except Exception as exc:
+                failures.append(exc)
+        if failures:
+            raise RuntimeError(
+                f"Telegram delivery failed for {len(failures)} of {len(self._senders)} destinations"
+            ) from failures[0]
+
+
 class TelegramHttpSender:
     def __init__(
         self,

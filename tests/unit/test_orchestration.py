@@ -14,7 +14,6 @@ async def test_dry_run_never_delivers_telegram() -> None:
         mock_mode=True,
         live_dry_run=True,
         alerts_enabled=True,
-        telegram_enabled=True,
     )
     scanner = ScannerState(settings)
     await scanner.refresh()
@@ -30,7 +29,6 @@ async def test_enabled_delivery_is_deduplicated() -> None:
         mock_mode=True,
         live_dry_run=False,
         alerts_enabled=True,
-        telegram_enabled=True,
         telegram_bot_token="test",
         telegram_chat_id="test",
     )

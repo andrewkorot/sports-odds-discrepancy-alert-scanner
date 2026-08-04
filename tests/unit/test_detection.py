@@ -44,6 +44,15 @@ def test_threshold_boundary_exactly_three_qualifies() -> None:
     assert len(result) == 1
     assert result[0].edge_percentage_points == Decimal("3")
 
+    candidate = evaluate_candidates(
+        [prediction],
+        [sportsbooks[0]],
+        [books[0]],
+        Settings(edge_threshold_pp=Decimal("3")),
+        NOW,
+    )[0]
+    assert candidate.configured_threshold == Decimal("3")
+
 
 def test_wrong_direction_is_explicitly_rejected() -> None:
     _, predictions, sportsbooks, books = mock_snapshot(NOW)

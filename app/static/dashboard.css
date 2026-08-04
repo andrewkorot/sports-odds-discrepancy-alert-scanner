@@ -271,6 +271,10 @@ tbody tr:hover { background: #fbfcfb; }
 .candidate-list { display: grid; gap: 8px; }
 .candidate-card { display: grid; grid-template-columns: 1.5fr .8fr .8fr 1.3fr auto; gap: 14px; align-items: center; padding: 15px 17px; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; }
 .candidate-details { grid-column: 1 / -1; margin-left: 0; width: 100%; }
+.candidate-edge-inputs { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 10px; background: var(--surface-soft); border-radius: 8px; }
+.candidate-edge-inputs div { min-width: 0; }
+.candidate-edge-inputs small { display: block; color: var(--muted); font-size: 8px; text-transform: uppercase; letter-spacing: .5px; }
+.candidate-edge-inputs strong { display: block; margin-top: 3px; font-size: 11px; }
 .candidate-audit { align-items: start; }
 .candidate-audit section { min-width: 0; }
 .candidate-audit .audit-field strong { white-space: pre-wrap; }
@@ -379,6 +383,7 @@ tbody tr:hover { background: #fbfcfb; }
   td:first-child { grid-column: 1 / -1; }
   td:before { content: attr(data-label); display: block; color: var(--muted); font-size: 7px; text-transform: uppercase; letter-spacing: .7px; margin-bottom: 3px; }
   .candidate-card { grid-template-columns: 1fr 1fr; padding: 13px; }
+  .candidate-edge-inputs { grid-template-columns: 1fr 1fr; }
   .candidate-card > div:first-child, .candidate-card .reasons { grid-column: 1 / -1; }
   .unmatched-summary { grid-template-columns: auto 1fr; }
   .unmatched-summary > .decision { grid-column: 1; grid-row: 2; justify-self: start; }

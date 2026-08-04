@@ -181,7 +181,6 @@ async def settings(request: Request) -> dict[str, object]:
         "sports_odds_mode": current.sports_odds_mode,
         "live_dry_run": current.live_dry_run,
         "alerts_enabled": current.alerts_enabled,
-        "telegram_enabled": current.telegram_enabled,
         "price_poll_interval_seconds": current.price_poll_interval_seconds,
         "provider_request_concurrency": current.provider_request_concurrency,
         "client_timezone": current.client_timezone,

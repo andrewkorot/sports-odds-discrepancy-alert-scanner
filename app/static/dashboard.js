@@ -407,6 +407,7 @@ function candidateDetails(candidate) {
   const decision = {
     accepted: candidate.accepted,
     edge_percentage_points: candidate.edge_percentage_points,
+    configured_threshold: candidate.configured_threshold,
     evaluated_at: candidate.evaluated_at,
     rejection_reasons: candidate.rejection_reasons,
   };
@@ -437,6 +438,13 @@ function renderCandidates() {
     <div><span class="cell-sub">Depth</span><span class="cell-main">${money(c.liquidity.total_depth_within_window_usd)}</span></div>
     <div class="reasons">${c.rejection_reasons.length ? c.rejection_reasons.map(r => `<span class="reason">${title(r)}</span>`).join("") : `<span class="cell-sub">All checks passed</span>`}</div>
     <span class="decision ${c.accepted ? "accepted" : ""}">${c.accepted ? "Accepted" : "Rejected"}</span>
+    <div class="candidate-edge-inputs">
+      <div><small>Prediction ask</small><strong>${pct(c.prediction_quote.best_ask_probability, 2)}</strong></div>
+      <div><small>Sportsbook odds</small><strong>${number(c.sportsbook_quote.decimal_odds, 2)}</strong></div>
+      <div><small>Implied probability</small><strong>${pct(c.sportsbook_quote.implied_probability, 2)}</strong></div>
+      <div><small>Calculated edge</small><strong class="${Number(c.edge_percentage_points) >= 0 ? "positive" : ""}">${Number(c.edge_percentage_points) >= 0 ? "+" : ""}${number(c.edge_percentage_points, 2)} pp</strong></div>
+      <div><small>Configured threshold</small><strong>${number(c.configured_threshold, 2)} pp</strong></div>
+    </div>
     ${candidateDetails(c)}
   </article>`).join("") ||
     `<div class="empty-state"><span>◇</span><h3>No candidates match</h3><p>Adjust the decision filters.</p></div>`;
@@ -451,7 +459,7 @@ function renderHealth() {
 }
 
 function renderSettings() {
-  const keys = ["client_timezone","discovery_calendar_days","enabled_sports","edge_threshold_pp","max_bid_ask_spread_cents","depth_window_from_midpoint_cents","min_depth_within_window_usd","min_trailing_24h_volume_usd","price_poll_interval_seconds","enabled_market_types","live_dry_run","alerts_enabled","telegram_enabled"];
+  const keys = ["client_timezone","discovery_calendar_days","enabled_sports","edge_threshold_pp","max_bid_ask_spread_cents","depth_window_from_midpoint_cents","min_depth_within_window_usd","min_trailing_24h_volume_usd","price_poll_interval_seconds","enabled_market_types","live_dry_run","alerts_enabled"];
   $("#settingsGrid").innerHTML = keys.map(k => `<div class="setting"><small>${title(k)}</small><strong>${esc(Array.isArray(state.settings[k]) ? state.settings[k].map(title).join(", ") : state.settings[k])}</strong></div>`).join("");
 }
 

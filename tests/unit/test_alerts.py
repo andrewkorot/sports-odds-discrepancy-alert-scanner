@@ -7,7 +7,11 @@ from app.core.config import Settings
 from app.domain.models import Opportunity, PredictionMarketQuote, SportsbookQuote
 from app.providers.mock.data import mock_snapshot
 from app.services.alert_deduplication import MemoryAlertDeduplicator
-from app.services.alert_formatter import format_telegram_alert
+from app.services.alert_formatter import (
+    FanoutTelegramSender,
+    MockTelegramSender,
+    format_telegram_alert,
+)
 from app.services.opportunity_detector import detect_opportunities
 
 
@@ -51,3 +55,31 @@ def test_telegram_formatting() -> None:
     assert " UTC" not in message
     assert "Depth within 4.5 cents of midpoint" in message
     assert "Pregame timing: PASSED" in message
+
+
+@pytest.mark.asyncio
+async def test_telegram_fanout_delivers_to_client_and_owner() -> None:
+    client = MockTelegramSender()
+    owner = MockTelegramSender()
+    sender = FanoutTelegramSender([client, owner])
+
+    await sender.send("alert")
+
+    assert client.messages == ["alert"]
+    assert owner.messages == ["alert"]
+
+
+def test_dual_telegram_destinations_override_legacy_pair() -> None:
+    settings = Settings(
+        telegram_bot_token="legacy-token",
+        telegram_chat_id="legacy-chat",
+        telegram_client_bot_token="client-token",
+        telegram_client_chat_id="client-chat",
+        telegram_owner_bot_token="owner-token",
+        telegram_owner_chat_id="owner-chat",
+    )
+
+    assert settings.telegram_destinations() == [
+        ("client-token", "client-chat"),
+        ("owner-token", "owner-chat"),
+    ]

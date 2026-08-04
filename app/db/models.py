@@ -210,6 +210,7 @@ class MarketCandidateRow(Base):
     snapshot_id: Mapped[UUID] = mapped_column(ForeignKey("order_book_snapshots.id"))
     accepted: Mapped[bool] = mapped_column(Boolean, index=True)
     edge_percentage_points: Mapped[Decimal] = mapped_column(Numeric(12, 6))
+    configured_threshold: Mapped[Decimal] = mapped_column(Numeric(12, 6))
     rejection_reasons: Mapped[list[str]] = mapped_column(JSON, default=list)
     liquidity_qualification: Mapped[dict[str, object]] = mapped_column(JSON)
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

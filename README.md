@@ -66,9 +66,12 @@ Every variable is also present in `.env.example`.
 | `SPORTS_ODDS_MODE` | `mock`, `live`, or `disabled` |
 | `LIVE_DRY_RUN` | Suppress all Telegram delivery (`true`) |
 | `ALERTS_ENABLED` | Master opportunity-alert switch (`false`) |
-| `TELEGRAM_ENABLED` | Telegram delivery switch (`false`) |
 | `TELEGRAM_BOT_TOKEN` | Optional Telegram bot token |
 | `TELEGRAM_CHAT_ID` | Optional Telegram destination |
+| `TELEGRAM_CLIENT_BOT_TOKEN` | Client Telegram bot token; preferred dual-destination configuration |
+| `TELEGRAM_CLIENT_CHAT_ID` | Client Telegram chat ID |
+| `TELEGRAM_OWNER_BOT_TOKEN` | Owner Telegram bot token |
+| `TELEGRAM_OWNER_CHAT_ID` | Owner Telegram chat ID |
 | `ENABLED_SPORTS` | Comma-separated canonical sports; currently `soccer` |
 | `ENABLED_BOOKMAKERS` | Six comma-separated canonical IDs |
 | `CLIENT_TIMEZONE` | Presentation timezone for dashboard and Telegram only (`America/Los_Angeles`) |
@@ -213,12 +216,15 @@ scans the current and next UTC days, and `3` scans three UTC days. The ending
 midnight is exclusive. `CLIENT_TIMEZONE` affects dashboard and alert display,
 not discovery boundaries. Scans run once at startup and then every
 `PRICE_POLL_INTERVAL_SECONDS`. Telegram is output-only and delivery occurs only
-when all three conditions are true:
+when both conditions are true:
 
 ```env
 LIVE_DRY_RUN=false
 ALERTS_ENABLED=true
-TELEGRAM_ENABLED=true
+TELEGRAM_CLIENT_BOT_TOKEN=client-bot-token
+TELEGRAM_CLIENT_CHAT_ID=client-chat-id
+TELEGRAM_OWNER_BOT_TOKEN=owner-bot-token
+TELEGRAM_OWNER_CHAT_ID=owner-chat-id
 ```
 
 The default live dry-run retrieves data and exposes results without Telegram

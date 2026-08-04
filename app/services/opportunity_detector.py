@@ -123,6 +123,7 @@ def evaluate_candidates(
                     accepted=not reasons,
                     rejection_reasons=reasons,
                     edge_percentage_points=edge,
+                    configured_threshold=settings.edge_threshold_pp,
                     evaluated_at=now,
                 )
             )

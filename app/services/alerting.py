@@ -6,6 +6,7 @@ from app.core.config import Settings
 from app.domain.models import Opportunity
 from app.services.alert_deduplication import MemoryAlertDeduplicator
 from app.services.alert_formatter import (
+    FanoutTelegramSender,
     TelegramHttpSender,
     TelegramSender,
     format_telegram_alert,
@@ -43,21 +44,17 @@ class AlertCoordinator:
         self.deduplicator = deduplicator or MemoryAlertDeduplicator()
         self.history = history
         self.sender = sender
-        self._http_sender: TelegramHttpSender | None = None
+        self._http_senders: list[TelegramHttpSender] = []
         if sender is None and self.delivery_enabled:
-            assert settings.telegram_bot_token and settings.telegram_chat_id
-            self._http_sender = TelegramHttpSender(
-                settings.telegram_bot_token, settings.telegram_chat_id
-            )
-            self.sender = self._http_sender
+            self._http_senders = [
+                TelegramHttpSender(token, chat_id)
+                for token, chat_id in settings.telegram_destinations()
+            ]
+            self.sender = FanoutTelegramSender(self._http_senders)
 
     @property
     def delivery_enabled(self) -> bool:
-        return (
-            not self.settings.live_dry_run
-            and self.settings.alerts_enabled
-            and self.settings.telegram_enabled
-        )
+        return not self.settings.live_dry_run and self.settings.alerts_enabled
 
     async def process(self) -> int:
         await self.deduplicator.sync_active(self.scanner.opportunities)
@@ -106,6 +103,6 @@ class AlertCoordinator:
         return sent
 
     async def aclose(self) -> None:
-        if self._http_sender is not None:
-            await self._http_sender.aclose()
+        for sender in self._http_senders:
+            await sender.aclose()
         await self.deduplicator.aclose()

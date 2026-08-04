@@ -35,7 +35,6 @@ class Settings(BaseSettings):
     sports_odds_mode: str = "mock"
     live_dry_run: bool = True
     alerts_enabled: bool = False
-    telegram_enabled: bool = False
     price_poll_interval_seconds: int = 30
     provider_request_concurrency: int = Field(default=8, ge=1, le=32)
     event_match_kickoff_tolerance_minutes: int = 15
@@ -43,6 +42,10 @@ class Settings(BaseSettings):
     event_match_ambiguity_margin: Decimal = Decimal("5")
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
+    telegram_client_bot_token: str | None = None
+    telegram_client_chat_id: str | None = None
+    telegram_owner_bot_token: str | None = None
+    telegram_owner_chat_id: str | None = None
     enabled_bookmakers: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: [
             "bookmaker_eu",
@@ -124,14 +127,34 @@ class Settings(BaseSettings):
                 missing.append("SPORTS_ODDS_API_KEY")
             if missing:
                 raise ValueError(f"Live mode requires: {', '.join(missing)}")
-        if (
-            not self.live_dry_run
-            and self.alerts_enabled
-            and self.telegram_enabled
-            and (not self.telegram_bot_token or not self.telegram_chat_id)
-        ):
-            raise ValueError("Telegram delivery requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
+        telegram_pairs = {
+            "legacy": (self.telegram_bot_token, self.telegram_chat_id),
+            "client": (self.telegram_client_bot_token, self.telegram_client_chat_id),
+            "owner": (self.telegram_owner_bot_token, self.telegram_owner_chat_id),
+        }
+        incomplete = [
+            name
+            for name, (token, chat_id) in telegram_pairs.items()
+            if bool(token) != bool(chat_id)
+        ]
+        if incomplete:
+            raise ValueError(
+                "Telegram token/chat ID must both be configured for: " + ", ".join(incomplete)
+            )
+        if not self.live_dry_run and self.alerts_enabled:
+            if not any(token and chat_id for token, chat_id in telegram_pairs.values()):
+                raise ValueError("Telegram delivery requires at least one complete destination")
         return self
+
+    def telegram_destinations(self) -> list[tuple[str, str]]:
+        """Return configured bot/chat pairs without exposing them through the API."""
+        pairs = [
+            (self.telegram_client_bot_token, self.telegram_client_chat_id),
+            (self.telegram_owner_bot_token, self.telegram_owner_chat_id),
+        ]
+        if not any(token and chat_id for token, chat_id in pairs):
+            pairs.append((self.telegram_bot_token, self.telegram_chat_id))
+        return [(token, chat_id) for token, chat_id in pairs if token and chat_id]
 
 
 @lru_cache

@@ -316,4 +316,5 @@ class MarketCandidate(DomainModel):
     accepted: bool
     rejection_reasons: list[str]
     edge_percentage_points: Decimal
+    configured_threshold: Decimal
     evaluated_at: datetime
