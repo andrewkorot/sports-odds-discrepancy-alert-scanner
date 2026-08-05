@@ -16,6 +16,7 @@ from app.providers.mock.data import mock_order_books, mock_snapshot
 from app.services.clock import Clock, SystemClock
 from app.services.live_pipeline import LiveScanSnapshot
 from app.services.opportunity_detector import (
+    deduplicate_sportsbook_quotes,
     evaluate_candidates,
     missing_sportsbook_outcomes,
     opportunities_from_candidates,
@@ -43,6 +44,7 @@ class ScannerState:
             )
         current = now or self.clock.now()
         event, predictions, sportsbooks, bookmakers = mock_snapshot(current)
+        sportsbooks = deduplicate_sportsbook_quotes(sportsbooks)
         self.events = [event]
         self.predictions = predictions
         self.sportsbooks = sportsbooks

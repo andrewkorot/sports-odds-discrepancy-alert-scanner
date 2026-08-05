@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from app.core.config import Settings
-from app.domain.enums import MatchConfidence, Provider, VolumeSource
+from app.domain.enums import MarketStatus, MatchConfidence, Provider, VolumeSource
 from app.domain.models import (
     Bookmaker,
     MarketCandidate,
@@ -22,6 +22,58 @@ from app.services.market_validation import (
     selection_rejections,
     settlement_compatible,
 )
+
+type QuoteAlignmentKey = tuple[
+    object,
+    str,
+    object,
+    object,
+    Decimal | None,
+    str | None,
+]
+type SportsbookQuoteIdentity = tuple[
+    object,
+    str,
+    object,
+    object,
+    Decimal | None,
+    str | None,
+    str,
+]
+
+
+def _alignment_key(quote: PredictionMarketQuote | SportsbookQuote) -> QuoteAlignmentKey:
+    return (
+        quote.canonical_event_id,
+        quote.sport,
+        quote.market_type,
+        quote.selection,
+        quote.line,
+        quote.participant,
+    )
+
+
+def _sportsbook_identity(quote: SportsbookQuote) -> SportsbookQuoteIdentity:
+    return (*_alignment_key(quote), quote.bookmaker_id)
+
+
+def deduplicate_sportsbook_quotes(quotes: list[SportsbookQuote]) -> list[SportsbookQuote]:
+    """Keep the newest open quote per exact bookmaker/outcome identity.
+
+    If an identity has no open record, its newest closed record is retained so
+    market-inactive diagnostics are not incorrectly converted into missing outcomes.
+    """
+    grouped: dict[SportsbookQuoteIdentity, list[SportsbookQuote]] = {}
+    for quote in quotes:
+        grouped.setdefault(_sportsbook_identity(quote), []).append(quote)
+    result: list[SportsbookQuote] = []
+    for values in grouped.values():
+        open_values = [quote for quote in values if quote.market_status == MarketStatus.OPEN]
+        eligible = open_values or values
+        result.append(
+            max(eligible, key=lambda quote: (quote.source_timestamp, quote.received_timestamp))
+        )
+    return result
 
 
 def _fallback_book(quote: PredictionMarketQuote) -> OrderBookSnapshot:
@@ -53,23 +105,14 @@ def evaluate_candidates(
     order_books: dict[str, OrderBookSnapshot] | None = None,
 ) -> list[MarketCandidate]:
     bookmaker_by_id = {item.canonical_id: item for item in bookmakers}
+    sportsbook_index: dict[QuoteAlignmentKey, list[SportsbookQuote]] = {}
+    for sportsbook in deduplicate_sportsbook_quotes(sportsbooks):
+        sportsbook_index.setdefault(_alignment_key(sportsbook), []).append(sportsbook)
     candidates: list[MarketCandidate] = []
     for prediction in predictions:
-        for sportsbook in sportsbooks:
-            if prediction.canonical_event_id != sportsbook.canonical_event_id:
-                continue
-            if prediction.sport not in settings.enabled_sports:
-                continue
-            if prediction.sport != sportsbook.sport:
-                continue
-            if prediction.market_type != sportsbook.market_type:
-                continue
-            if (
-                prediction.selection != sportsbook.selection
-                or prediction.line != sportsbook.line
-                or prediction.participant != sportsbook.participant
-            ):
-                continue
+        if prediction.sport not in settings.enabled_sports:
+            continue
+        for sportsbook in sportsbook_index.get(_alignment_key(prediction), []):
             book = bookmaker_by_id.get(sportsbook.bookmaker_id)
             reasons: list[str] = []
             if book is None or not book.enabled or book.availability_status != "available":
@@ -153,7 +196,7 @@ def missing_sportsbook_outcomes(
             quote.line,
             quote.participant,
         )
-        for quote in sportsbooks
+        for quote in deduplicate_sportsbook_quotes(sportsbooks)
     }
     enabled_books = [book for book in bookmakers if book.enabled]
     audits: list[MissingSportsbookOutcomeAudit] = []

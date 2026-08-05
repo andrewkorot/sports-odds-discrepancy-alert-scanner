@@ -53,6 +53,7 @@ from app.services.normalization import (
     team_identity,
 )
 from app.services.opportunity_detector import (
+    deduplicate_sportsbook_quotes,
     evaluate_candidates,
     missing_sportsbook_outcomes,
     opportunities_from_candidates,
@@ -1181,6 +1182,14 @@ async def collect_live_snapshot(
                     direct_url=quote.direct_url,
                 )
             )
+    sportsbook_quote_count = len(sportsbooks)
+    sportsbooks = deduplicate_sportsbook_quotes(sportsbooks)
+    logger.info(
+        "pricing.sportsbook.deduplicated input_quotes=%d retained_quotes=%d removed=%d",
+        sportsbook_quote_count,
+        len(sportsbooks),
+        sportsbook_quote_count - len(sportsbooks),
+    )
     trade_tasks: dict[
         tuple[Provider, str],
         asyncio.Task[list[ProviderTrade]],

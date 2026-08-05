@@ -6,6 +6,7 @@ from app.domain.enums import AvailabilityStatus, MarketStatus
 from app.domain.models import Opportunity
 from app.providers.mock.data import mock_snapshot
 from app.services.opportunity_detector import (
+    deduplicate_sportsbook_quotes,
     detect_opportunities,
     evaluate_candidates,
     missing_sportsbook_outcomes,
@@ -158,6 +159,38 @@ def test_candidates_only_compare_exactly_aligned_outcomes() -> None:
     )
 
     assert evaluate_candidates([prediction], [mismatched], books, Settings(), NOW) == []
+
+
+def test_sportsbook_quotes_are_deduplicated_to_newest_open_record() -> None:
+    _, predictions, sportsbooks, books = mock_snapshot(NOW)
+    prediction = predictions[0]
+    original = next(
+        quote
+        for quote in sportsbooks
+        if quote.bookmaker_id == "pinnacle"
+        and quote.market_type == prediction.market_type
+        and quote.selection == prediction.selection
+        and quote.line == prediction.line
+        and quote.participant == prediction.participant
+    )
+    older = original.model_copy(
+        update={"decimal_odds": Decimal("2.00"), "source_timestamp": NOW - timedelta(seconds=2)}
+    )
+    newest_open = original.model_copy(
+        update={"decimal_odds": Decimal("2.20"), "source_timestamp": NOW - timedelta(seconds=1)}
+    )
+    newest_closed = original.model_copy(
+        update={"market_status": MarketStatus.CLOSED, "source_timestamp": NOW}
+    )
+
+    deduplicated = deduplicate_sportsbook_quotes([older, newest_open, newest_closed])
+    candidates = evaluate_candidates(
+        [prediction], [older, newest_open, newest_closed], books, Settings(), NOW
+    )
+
+    assert deduplicated == [newest_open]
+    assert len(candidates) == 1
+    assert candidates[0].sportsbook_quote == newest_open
 
 
 def test_missing_aligned_outcome_is_audited_without_fabricated_odds() -> None:
