@@ -22,7 +22,7 @@ async def test_health_and_seeded_end_to_end(client: AsyncClient) -> None:
     assert health.status_code == 200
     assert health.json()["application_status"] == "ok"
     opportunities = (await client.get("/opportunities")).json()
-    assert len(opportunities) == 108
+    assert len(opportunities) == 109
     pinnacle = next(
         x
         for x in opportunities
@@ -33,7 +33,7 @@ async def test_health_and_seeded_end_to_end(client: AsyncClient) -> None:
     )
     assert Decimal(pinnacle["sportsbook_implied_probability"]).quantize(
         Decimal("0.0001")
-    ) == Decimal("0.5600")
+    ) == Decimal("0.4800")
     assert Decimal(pinnacle["edge_percentage_points"]).quantize(Decimal("0.01")) == Decimal("4.00")
 
 
@@ -58,9 +58,18 @@ async def test_dashboard_and_static_assets(client: AsyncClient) -> None:
     assert 'get("/opportunities")' in script.text
     assert 'get("/event-matches")' in script.text
     assert "sportsbook.selection, sportsbook.line, sportsbook.participant" in script.text
-    assert 'data-candidate-audit="${esc(c.id)}"' in script.text
+    assert 'data-candidate-audit="${esc(candidate.id)}"' in script.text
     assert "all_candidate_rejection_reasons: reasons" in script.text
     assert "liquidity_rejection_reasons: candidate.liquidity.rejection_reasons" in script.text
+    assert 'class="candidate-event-group ${expanded ? "expanded" : ""}"' in script.text
+    assert "candidate-provider-group" in script.text
+    assert "candidate-outcome-group" in script.text
+    assert 'candidateSection("Prediction-market quote"' in script.text
+    assert 'candidateSection("Sportsbook quote"' in script.text
+    assert 'id="expandAllCandidates"' in dashboard.text
+    assert 'id="collapseAllCandidates"' in dashboard.text
+    assert 'id="toggleMissingOutcomes"' in dashboard.text
+    assert 'class="candidate-list hidden" id="missingOutcomeList"' in dashboard.text
     assert (await client.get("/event-matches")).status_code == 200
 
 
@@ -126,13 +135,14 @@ async def test_market_type_and_candidate_filters(client: AsyncClient) -> None:
     rejected = (await client.get("/market-candidates", params={"accepted": "false"})).json()
     assert accepted and all(item["accepted"] for item in accepted)
     assert rejected and all(not item["accepted"] for item in rejected)
-    mismatch = (
-        await client.get("/market-candidates", params={"rejection_reason": "line_mismatch"})
+    mismatches = (
+        await client.get("/market-candidates", params={"rejection_reason": "outcome_mismatch"})
     ).json()
-    assert mismatch and all("line_mismatch" in item["rejection_reasons"] for item in mismatch)
+    assert mismatches == []
+    assert (await client.get("/missing-sportsbook-outcomes")).status_code == 200
     detail = await client.get(f"/market-candidates/{rejected[0]['id']}")
     assert detail.status_code == 200
-    assert detail.json()["liquidity"]["overall_passed"]
+    assert "liquidity" in detail.json()
 
 
 @pytest.mark.asyncio

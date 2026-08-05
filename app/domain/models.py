@@ -83,6 +83,11 @@ class PredictionMarketQuote(DomainModel):
     provider: Provider
     provider_event_id: str
     provider_market_id: str
+    provider_source_market_id: str | None = None
+    provider_market_name: str | None = None
+    provider_market_type: str | None = None
+    provider_outcome_id: str | None = None
+    provider_outcome_name: str | None = None
     canonical_event_id: UUID
     sport: str = "soccer"
     competition: str
@@ -115,6 +120,12 @@ class PredictionMarketQuote(DomainModel):
 class SportsbookQuote(DomainModel):
     provider: Provider = Provider.ODDSPAPI
     provider_event_id: str
+    provider_market_id: str | None = None
+    provider_market_name: str | None = None
+    provider_market_type: str | None = None
+    provider_outcome_id: str | None = None
+    provider_outcome_name: str | None = None
+    bookmaker_outcome_id: str | None = None
     canonical_event_id: UUID
     sport: str = "soccer"
     bookmaker_id: str
@@ -317,4 +328,15 @@ class MarketCandidate(DomainModel):
     rejection_reasons: list[str]
     edge_percentage_points: Decimal
     configured_threshold: Decimal
+    evaluated_at: datetime
+
+
+class MissingSportsbookOutcomeAudit(DomainModel):
+    """A required bookmaker has no quote aligned to a prediction-market outcome."""
+
+    id: UUID = Field(default_factory=uuid4)
+    prediction_quote: PredictionMarketQuote
+    bookmaker_id: str
+    bookmaker_display_name: str
+    rejection_reason: str = "sportsbook_outcome_missing"
     evaluated_at: datetime

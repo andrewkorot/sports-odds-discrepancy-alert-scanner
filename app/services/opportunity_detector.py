@@ -6,6 +6,7 @@ from app.domain.enums import MatchConfidence, Provider, VolumeSource
 from app.domain.models import (
     Bookmaker,
     MarketCandidate,
+    MissingSportsbookOutcomeAudit,
     Opportunity,
     OrderBookSnapshot,
     PredictionMarketQuote,
@@ -62,6 +63,12 @@ def evaluate_candidates(
             if prediction.sport != sportsbook.sport:
                 continue
             if prediction.market_type != sportsbook.market_type:
+                continue
+            if (
+                prediction.selection != sportsbook.selection
+                or prediction.line != sportsbook.line
+                or prediction.participant != sportsbook.participant
+            ):
                 continue
             book = bookmaker_by_id.get(sportsbook.bookmaker_id)
             reasons: list[str] = []
@@ -128,6 +135,61 @@ def evaluate_candidates(
                 )
             )
     return candidates
+
+
+def missing_sportsbook_outcomes(
+    predictions: list[PredictionMarketQuote],
+    sportsbooks: list[SportsbookQuote],
+    bookmakers: list[Bookmaker],
+    now: datetime,
+) -> list[MissingSportsbookOutcomeAudit]:
+    """Record absent exact outcomes without constructing a synthetic sportsbook quote."""
+    available = {
+        (
+            quote.canonical_event_id,
+            quote.bookmaker_id,
+            quote.market_type,
+            quote.selection,
+            quote.line,
+            quote.participant,
+        )
+        for quote in sportsbooks
+    }
+    enabled_books = [book for book in bookmakers if book.enabled]
+    audits: list[MissingSportsbookOutcomeAudit] = []
+    seen: set[tuple[object, ...]] = set()
+    for prediction in predictions:
+        for book in enabled_books:
+            key = (
+                prediction.provider,
+                prediction.provider_market_id,
+                book.canonical_id,
+                prediction.market_type,
+                prediction.selection,
+                prediction.line,
+                prediction.participant,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            outcome_key = (
+                prediction.canonical_event_id,
+                book.canonical_id,
+                prediction.market_type,
+                prediction.selection,
+                prediction.line,
+                prediction.participant,
+            )
+            if outcome_key not in available:
+                audits.append(
+                    MissingSportsbookOutcomeAudit(
+                        prediction_quote=prediction,
+                        bookmaker_id=book.canonical_id,
+                        bookmaker_display_name=book.display_name,
+                        evaluated_at=now,
+                    )
+                )
+    return audits
 
 
 def opportunities_from_candidates(

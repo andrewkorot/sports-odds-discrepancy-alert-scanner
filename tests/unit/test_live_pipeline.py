@@ -305,6 +305,11 @@ async def test_live_pipeline_retrieves_normalizes_matches_and_calculates() -> No
     assert len(snapshot.sportsbooks) == 1
     assert len(snapshot.candidates) == 1
     assert len(snapshot.opportunities) == 1
+    assert snapshot.predictions[0].provider_outcome_id == "yes"
+    assert snapshot.predictions[0].provider_outcome_name == "Yes"
+    assert snapshot.predictions[0].provider_source_market_id == "kalshi-home"
+    assert snapshot.sportsbooks[0].provider_market_id == "101"
+    assert snapshot.sportsbooks[0].provider_outcome_id == "101"
     opportunity = snapshot.opportunities[0]
     assert opportunity.sport == "soccer"
     assert opportunity.bookmaker_id == "pinnacle"

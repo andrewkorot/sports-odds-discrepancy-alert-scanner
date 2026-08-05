@@ -99,7 +99,9 @@ class SportsOddsConnector:
         self._health = ProviderHealthRecord(
             provider=Provider.ODDSPAPI, mode=mode, enabled=True, connected=False
         )
-        self._market_catalog: dict[tuple[int, int], tuple[str, str, str]] = {}
+        self._market_catalog: dict[
+            tuple[int, int], tuple[str, str, str, str | None, str | None, str | None]
+        ] = {}
         self._market_catalog_loaded = False
         self._market_catalog_lock = asyncio.Lock()
         self._bookmaker_catalog: tuple[list[Bookmaker], list[str]] | None = None
@@ -626,7 +628,14 @@ class SportsOddsConnector:
                     semantics = self._market_catalog.get((int(market_id), int(outcome_id)))
                     if semantics is None:
                         continue
-                    market_type, selection, period = semantics
+                    (
+                        market_type,
+                        selection,
+                        period,
+                        provider_market_name,
+                        provider_market_type,
+                        provider_outcome_name,
+                    ) = semantics
                     players = cast(dict[str, dict[str, Any]], outcome.get("players", {}))
                     for raw in players.values():
                         bookmaker_outcome_id = (
@@ -651,6 +660,9 @@ class SportsOddsConnector:
                             provider_outcome_id=int(outcome_id),
                             bookmaker_outcome_id=bookmaker_outcome_id,
                             market_id=int(market_id),
+                            provider_market_name=provider_market_name,
+                            provider_market_type=provider_market_type,
+                            provider_outcome_name=provider_outcome_name,
                             decimal_odds=Decimal(str(raw["price"])),
                             active=bool(raw["active"]),
                             market_active=bool(market["marketActive"]),
@@ -706,6 +718,13 @@ class SportsOddsConnector:
                             "moneyline",
                             selection,
                             "regulation",
+                            str(market["marketName"]) if market.get("marketName") else None,
+                            str(market["marketType"]) if market.get("marketType") else None,
+                            (
+                                str(outcome["outcomeName"])
+                                if outcome.get("outcomeName") is not None
+                                else None
+                            ),
                         )
             self._market_catalog_loaded = True
 

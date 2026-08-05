@@ -638,6 +638,10 @@ async def test_oddspapi_v4_odds_contract_and_nested_mapping() -> None:
     assert quotes[0].bookmaker_id == "bookmaker_eu"
     assert quotes[0].market_id == 101
     assert quotes[0].provider_outcome_id == 102
+    assert quotes[0].provider_market_name == "Full Time Result"
+    assert quotes[0].provider_market_type == "1x2"
+    assert quotes[0].provider_outcome_name == "1"
+    assert quotes[0].bookmaker_outcome_id == "home"
     assert quotes[0].decimal_odds == Decimal("2.15")
     assert quotes[0].changed_at == datetime(2026, 7, 30, 12, tzinfo=UTC)
     await client.aclose()

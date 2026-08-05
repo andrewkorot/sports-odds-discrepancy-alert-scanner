@@ -5,7 +5,11 @@ from app.core.config import Settings
 from app.domain.enums import AvailabilityStatus, MarketStatus
 from app.domain.models import Opportunity
 from app.providers.mock.data import mock_snapshot
-from app.services.opportunity_detector import detect_opportunities, evaluate_candidates
+from app.services.opportunity_detector import (
+    detect_opportunities,
+    evaluate_candidates,
+    missing_sportsbook_outcomes,
+)
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -140,6 +144,40 @@ def test_missing_bookmaker_has_no_fabricated_quote() -> None:
     sportsbooks = [q for q in sportsbooks if q.bookmaker_id != "coolbet"]
     results = detect_opportunities(predictions, sportsbooks, books, Settings(), NOW)
     assert all(result.bookmaker_id != "coolbet" for result in results)
+
+
+def test_candidates_only_compare_exactly_aligned_outcomes() -> None:
+    _, predictions, sportsbooks, books = mock_snapshot(NOW)
+    prediction = predictions[0]
+    mismatched = next(
+        quote
+        for quote in sportsbooks
+        if quote.canonical_event_id == prediction.canonical_event_id
+        and quote.market_type == prediction.market_type
+        and quote.selection != prediction.selection
+    )
+
+    assert evaluate_candidates([prediction], [mismatched], books, Settings(), NOW) == []
+
+
+def test_missing_aligned_outcome_is_audited_without_fabricated_odds() -> None:
+    _, predictions, sportsbooks, books = mock_snapshot(NOW)
+    prediction = predictions[0]
+    book = books[0]
+    wrong_outcomes = [
+        quote
+        for quote in sportsbooks
+        if quote.bookmaker_id == book.canonical_id
+        and quote.market_type == prediction.market_type
+        and quote.selection != prediction.selection
+    ]
+
+    audits = missing_sportsbook_outcomes([prediction], wrong_outcomes, [book], NOW)
+
+    assert len(audits) == 1
+    assert audits[0].bookmaker_id == book.canonical_id
+    assert audits[0].rejection_reason == "sportsbook_outcome_missing"
+    assert not hasattr(audits[0], "sportsbook_quote")
 
 
 def test_unavailable_bookmaker_rejected() -> None:

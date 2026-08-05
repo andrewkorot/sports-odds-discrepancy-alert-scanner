@@ -289,6 +289,7 @@ class PolymarketConnector:
             provider_market_id=market.id,
             condition_id=market.conditionId,
             title=market.question,
+            raw_market_type=market.sportsMarketType,
             status="open" if market.active and not market.closed else "closed",
             order_book_enabled=market.enableOrderBook,
             outcomes=[

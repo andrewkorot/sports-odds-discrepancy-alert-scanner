@@ -331,11 +331,16 @@ class KalshiConnector:
     @staticmethod
     def parse_market(raw: object) -> ProviderMarket:
         market = KalshiMarketPayload.model_validate(raw)
+        raw_market_type = None
+        if market.model_extra:
+            value = market.model_extra.get("market_type")
+            raw_market_type = str(value) if value is not None else None
         return ProviderMarket(
             provider=Provider.KALSHI,
             provider_event_id=market.event_ticker,
             provider_market_id=market.ticker,
             title=market.title or market.subtitle,
+            raw_market_type=raw_market_type,
             status=market.status,
             order_book_enabled=True,
             outcomes=[

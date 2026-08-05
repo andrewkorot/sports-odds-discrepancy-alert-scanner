@@ -59,6 +59,7 @@ class ProviderMarket(ProviderRecord):
     provider_market_id: str
     condition_id: str | None = None
     title: str
+    raw_market_type: str | None = None
     status: str
     order_book_enabled: bool
     outcomes: list[ProviderOutcome]
@@ -118,6 +119,9 @@ class ProviderSportsbookQuote(ProviderRecord):
     provider_outcome_id: int
     bookmaker_outcome_id: str | None = None
     market_id: int
+    provider_market_name: str | None = None
+    provider_market_type: str | None = None
+    provider_outcome_name: str | None = None
     decimal_odds: Decimal
     active: bool
     market_active: bool

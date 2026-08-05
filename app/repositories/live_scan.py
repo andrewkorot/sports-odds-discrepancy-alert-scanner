@@ -17,6 +17,7 @@ from app.db.models import (
     EventRow,
     MarketCandidateRow,
     MarketRow,
+    MissingSportsbookOutcomeRow,
     OpportunityRow,
     OrderBookLevelRow,
     OrderBookSnapshotRow,
@@ -24,6 +25,7 @@ from app.db.models import (
     ProviderEventRow,
     ProviderMarketRow,
     SportsbookQuoteRow,
+    SystemSettingRow,
     TeamRow,
 )
 from app.domain.models import CanonicalEvent, Opportunity, PredictionMarketQuote, SportsbookQuote
@@ -37,6 +39,25 @@ class LiveScanRepository:
 
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self._sessions = sessions
+
+    async def load_system_setting(self, key: str) -> dict[str, object] | None:
+        async with self._sessions() as session:
+            row = await session.get(SystemSettingRow, key)
+            return dict(row.value) if row is not None else None
+
+    async def save_system_setting(
+        self,
+        key: str,
+        value: dict[str, object],
+        updated_at: datetime,
+    ) -> None:
+        async with self._sessions.begin() as session:
+            row = await session.get(SystemSettingRow, key)
+            if row is None:
+                session.add(SystemSettingRow(key=key, value=value, updated_at=updated_at))
+            else:
+                row.value = value
+                row.updated_at = updated_at
 
     async def approved_event_mappings(self) -> dict[tuple[str, str], str]:
         """Return previously persisted prediction-event to OddsPapi event mappings."""
@@ -203,6 +224,11 @@ class LiveScanRepository:
                 quote_row = PredictionMarketQuoteRow(
                     id=uuid4(),
                     provider_market_id=provider_market.id,
+                    provider_source_market_id=quote.provider_source_market_id,
+                    provider_market_name=quote.provider_market_name,
+                    provider_market_type=quote.provider_market_type,
+                    provider_outcome_id=quote.provider_outcome_id,
+                    provider_outcome_name=quote.provider_outcome_name,
                     best_bid_probability=quote.best_bid_probability,
                     best_ask_probability=quote.best_ask_probability,
                     best_bid_size=quote.best_bid_size,
@@ -250,7 +276,9 @@ class LiveScanRepository:
             await session.flush()
             session.add_all(pending_order_book_levels)
 
-            sportsbook_quote_rows: dict[tuple[str, str, str, str], SportsbookQuoteRow] = {}
+            sportsbook_quote_rows: dict[
+                tuple[str, str, str, str, str, str], SportsbookQuoteRow
+            ] = {}
             pending_sportsbook_quotes: list[
                 tuple[SportsbookQuote, MarketRow, ProviderEventRow]
             ] = []
@@ -274,6 +302,12 @@ class LiveScanRepository:
                     provider_event_id=provider_event.id,
                     market_id=market.id,
                     bookmaker_id=quote.bookmaker_id,
+                    provider_market_id=quote.provider_market_id,
+                    provider_market_name=quote.provider_market_name,
+                    provider_market_type=quote.provider_market_type,
+                    provider_outcome_id=quote.provider_outcome_id,
+                    provider_outcome_name=quote.provider_outcome_name,
+                    bookmaker_outcome_id=quote.bookmaker_outcome_id,
                     decimal_odds=quote.decimal_odds,
                     implied_probability=quote.implied_probability,
                     source_timestamp=quote.source_timestamp,
@@ -286,6 +320,8 @@ class LiveScanRepository:
                         quote.bookmaker_id,
                         quote.market_type.value,
                         quote.selection.value,
+                        str(quote.line) if quote.line is not None else "",
+                        quote.participant or "",
                     )
                 ] = sportsbook_quote_row
 
@@ -305,6 +341,8 @@ class LiveScanRepository:
                         sportsbook.bookmaker_id,
                         sportsbook.market_type.value,
                         sportsbook.selection.value,
+                        str(sportsbook.line) if sportsbook.line is not None else "",
+                        sportsbook.participant or "",
                     )
                 ]
                 candidate_row = MarketCandidateRow(
@@ -321,6 +359,21 @@ class LiveScanRepository:
                 )
                 session.add(candidate_row)
 
+            for audit in snapshot.missing_outcomes:
+                prediction = audit.prediction_quote
+                prediction_row = prediction_quote_rows[
+                    (prediction.provider.value, prediction.provider_market_id)
+                ]
+                session.add(
+                    MissingSportsbookOutcomeRow(
+                        id=audit.id,
+                        prediction_quote_id=prediction_row.id,
+                        bookmaker_id=audit.bookmaker_id,
+                        rejection_reason=audit.rejection_reason,
+                        evaluated_at=audit.evaluated_at,
+                    )
+                )
+
             for opportunity in snapshot.opportunities:
                 prediction_row = prediction_quote_rows[
                     (
@@ -334,6 +387,8 @@ class LiveScanRepository:
                         opportunity.bookmaker_id,
                         opportunity.market_type.value,
                         opportunity.selection.value,
+                        str(opportunity.line) if opportunity.line is not None else "",
+                        opportunity.participant or "",
                     )
                 ]
                 market = market_rows[self._market_key(opportunity)]

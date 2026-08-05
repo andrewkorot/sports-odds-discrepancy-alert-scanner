@@ -12,6 +12,7 @@ from app.domain.models import (
     ConnectorHealth,
     EventMatchAudit,
     MarketCandidate,
+    MissingSportsbookOutcomeAudit,
     Opportunity,
     PredictionMarketQuote,
 )
@@ -222,6 +223,20 @@ async def market_candidate(request: Request, candidate_id: UUID) -> MarketCandid
         if item.id == candidate_id:
             return item
     raise HTTPException(status_code=404, detail="Market candidate not found")
+
+
+@router.get("/missing-sportsbook-outcomes", response_model=list[MissingSportsbookOutcomeAudit])
+async def missing_sportsbook_outcome_audits(
+    request: Request,
+    provider: str | None = None,
+    bookmaker: str | None = None,
+) -> list[MissingSportsbookOutcomeAudit]:
+    return [
+        item
+        for item in state(request).missing_outcomes
+        if (provider is None or item.prediction_quote.provider.value == provider.casefold())
+        and (bookmaker is None or item.bookmaker_id == bookmaker.casefold())
+    ]
 
 
 @router.get("/opportunities/{opportunity_id}", response_model=Opportunity)

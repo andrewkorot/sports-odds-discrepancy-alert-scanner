@@ -28,6 +28,7 @@ from app.domain.models import (
     CanonicalEvent,
     EventMatchAudit,
     MarketCandidate,
+    MissingSportsbookOutcomeAudit,
     Opportunity,
     OrderBookSnapshot,
     PredictionMarketQuote,
@@ -51,7 +52,11 @@ from app.services.normalization import (
     qualifiers_compatible,
     team_identity,
 )
-from app.services.opportunity_detector import evaluate_candidates, opportunities_from_candidates
+from app.services.opportunity_detector import (
+    evaluate_candidates,
+    missing_sportsbook_outcomes,
+    opportunities_from_candidates,
+)
 from app.services.provider_normalization import normalize_order_book
 
 logger = logging.getLogger("uvicorn.error")
@@ -79,6 +84,7 @@ class LiveScanSnapshot:
     bookmakers: list[Bookmaker]
     order_books: dict[str, OrderBookSnapshot]
     candidates: list[MarketCandidate]
+    missing_outcomes: list[MissingSportsbookOutcomeAudit]
     opportunities: list[Opportunity]
     event_matches: list[EventMatchAudit]
 
@@ -754,11 +760,11 @@ def _selection_from_text(text: str, event: ProviderEvent) -> Selection | None:
 
 def prediction_selections(
     market: ProviderMarket, event: ProviderEvent
-) -> list[tuple[Selection, str]]:
+) -> list[tuple[Selection, str, str, str]]:
     if market.status.casefold() not in {"open", "active"} or not market.order_book_enabled:
         return []
     title_selection = _selection_from_text(market.title, event)
-    results: list[tuple[Selection, str]] = []
+    results: list[tuple[Selection, str, str, str]] = []
     for outcome in market.outcomes:
         outcome_selection = _selection_from_text(outcome.name, event)
         selection = outcome_selection or (
@@ -772,7 +778,8 @@ def prediction_selections(
             else market.provider_market_id
         )
         if lookup_id:
-            results.append((selection, lookup_id))
+            outcome_id = outcome.token_id or outcome.selection_id
+            results.append((selection, lookup_id, outcome_id, outcome.name))
     return list(dict.fromkeys(results))
 
 
@@ -1143,6 +1150,12 @@ async def collect_live_snapshot(
             sportsbooks.append(
                 SportsbookQuote(
                     provider_event_id=event.provider_event_id,
+                    provider_market_id=str(quote.market_id),
+                    provider_market_name=quote.provider_market_name,
+                    provider_market_type=quote.provider_market_type,
+                    provider_outcome_id=str(quote.provider_outcome_id),
+                    provider_outcome_name=quote.provider_outcome_name,
+                    bookmaker_outcome_id=quote.bookmaker_outcome_id,
                     canonical_event_id=event_id,
                     bookmaker_id=quote.bookmaker_id,
                     bookmaker_display_name=CANONICAL_BOOKMAKERS.get(
@@ -1190,6 +1203,8 @@ async def collect_live_snapshot(
         market: ProviderMarket,
         selection: Selection,
         lookup_id: str,
+        provider_outcome_id: str,
+        provider_outcome_name: str,
     ) -> tuple[PredictionMarketQuote | None, OrderBookSnapshot | None]:
         trade_task: asyncio.Task[list[ProviderTrade]] | None = None
         if market.provider == Provider.KALSHI:
@@ -1246,6 +1261,11 @@ async def collect_live_snapshot(
             provider=market.provider,
             provider_event_id=prediction_event.provider_event_id,
             provider_market_id=synthetic_market_id,
+            provider_source_market_id=market.provider_market_id,
+            provider_market_name=market.title,
+            provider_market_type=market.raw_market_type,
+            provider_outcome_id=provider_outcome_id,
+            provider_outcome_name=provider_outcome_name,
             canonical_event_id=canonical_event_id(matched),
             sport=matched.sport or "soccer",
             competition=matched.competition or matched.category or "",
@@ -1277,10 +1297,17 @@ async def collect_live_snapshot(
             market,
             selection,
             lookup_id,
+            provider_outcome_id,
+            provider_outcome_name,
         )
         for connector, prediction_event, matched, markets in market_results
         for market in markets
-        for selection, lookup_id in prediction_selections(market, prediction_event)
+        for (
+            selection,
+            lookup_id,
+            provider_outcome_id,
+            provider_outcome_name,
+        ) in prediction_selections(market, prediction_event)
     ]
     selection_results = await asyncio.gather(*(price_selection(*job) for job in selection_jobs))
     if trade_tasks:
@@ -1300,12 +1327,15 @@ async def collect_live_snapshot(
     candidates = evaluate_candidates(
         predictions, sportsbooks, bookmakers, settings, now, order_books
     )
+    missing_outcomes = missing_sportsbook_outcomes(predictions, sportsbooks, bookmakers, now)
     logger.info(
         "scan.qualification.complete predictions=%d sportsbook_quotes=%d "
-        "candidates=%d opportunities=%d duration_seconds=%.3f total_seconds=%.3f",
+        "candidates=%d missing_outcomes=%d opportunities=%d "
+        "duration_seconds=%.3f total_seconds=%.3f",
         len(predictions),
         len(sportsbooks),
         len(candidates),
+        len(missing_outcomes),
         sum(candidate.accepted for candidate in candidates),
         perf_counter() - qualification_started,
         perf_counter() - scan_started,
@@ -1317,6 +1347,7 @@ async def collect_live_snapshot(
         bookmakers=bookmakers,
         order_books=order_books,
         candidates=candidates,
+        missing_outcomes=missing_outcomes,
         opportunities=opportunities_from_candidates(candidates, settings),
         event_matches=event_matches,
     )

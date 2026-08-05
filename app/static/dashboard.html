@@ -167,7 +167,15 @@
         <select id="candidateMarketFilter"><option value="">All markets</option><option value="moneyline">Moneyline</option><option value="total">Totals</option><option value="spread">Spread</option><option value="btts">BTTS</option></select>
         <label class="search-field"><span>⌕</span><input id="candidateSearch" type="search" placeholder="Search event, league, or provider" aria-label="Search market candidates"></label>
       </div>
+      <div class="candidate-expand-controls">
+        <button id="expandAllCandidates" type="button">Expand all</button>
+        <button id="collapseAllCandidates" type="button">Collapse all</button>
+      </div>
       <div class="candidate-list" id="candidateList"></div>
+      <section class="panel missing-outcomes-panel">
+        <div class="panel-heading"><div><p class="eyebrow">Missing aligned prices</p><h3>Sportsbook outcomes missing</h3><p class="settings-note">A prediction outcome exists, but this sportsbook supplied no exactly aligned selection, line, and participant.</p></div><div class="missing-outcome-actions"><span class="audit-count" id="missingOutcomeCount">0</span><button id="toggleMissingOutcomes" type="button" aria-expanded="false">Expand</button></div></div>
+        <div class="candidate-list hidden" id="missingOutcomeList"></div>
+      </section>
     </section>
 
     <section class="view" id="view-health">

@@ -3,7 +3,7 @@ const CANDIDATE_MODAL_STORAGE_KEY = "scannerSelectedCandidateKey";
 const MAPPING_MODAL_STORAGE_KEY = "scannerSelectedMappingKey";
 const storedCandidateKey = (() => { try { return sessionStorage.getItem(CANDIDATE_MODAL_STORAGE_KEY); } catch { return null; } })();
 const storedMappingKey = (() => { try { return sessionStorage.getItem(MAPPING_MODAL_STORAGE_KEY); } catch { return null; } })();
-const state = { health: null, providers: [], events: [], eventMatches: [], bookmakers: [], opportunities: [], candidates: [], markets: [], settings: {}, settingsDirty: false, matchedPage: 1, matchedPageSize: 8, unmatchedPage: 1, unmatchedPageSize: 8, refreshTimer: null, selectedCandidateKey: storedCandidateKey, selectedCandidateSnapshot: null, selectedMappingKey: storedMappingKey, selectedMappingSnapshot: null };
+const state = { health: null, providers: [], events: [], eventMatches: [], bookmakers: [], opportunities: [], candidates: [], missingOutcomes: [], markets: [], settings: {}, settingsDirty: false, expandedCandidateEvents: new Set(), visibleCandidateEventKeys: [], missingOutcomesExpanded: false, matchedPage: 1, matchedPageSize: 8, unmatchedPage: 1, unmatchedPageSize: 8, refreshTimer: null, selectedCandidateKey: storedCandidateKey, selectedCandidateSnapshot: null, selectedMappingKey: storedMappingKey, selectedMappingSnapshot: null };
 const RUNTIME_SETTING_KEYS = ["min_kalshi_ask_size","min_polymarket_ask_size","discovery_calendar_days","alert_cooldown_minutes","realert_edge_increase_pp","min_minutes_before_kickoff","event_match_kickoff_tolerance_minutes","max_prediction_price_age_seconds","max_sportsbook_price_age_seconds","max_bid_ask_spread_cents","depth_window_from_midpoint_cents","min_depth_within_window_usd","min_trailing_24h_volume_usd","edge_threshold_pp","price_poll_interval_seconds","provider_request_concurrency","auto_start_stop_enabled","scan_auto_start_time","scan_auto_stop_time","event_match_fuzzy_min_score","event_match_ambiguity_margin"];
 const INTEGER_RUNTIME_SETTINGS = new Set(["discovery_calendar_days","alert_cooldown_minutes","min_minutes_before_kickoff","event_match_kickoff_tolerance_minutes","max_prediction_price_age_seconds","max_sportsbook_price_age_seconds","price_poll_interval_seconds","provider_request_concurrency"]);
 
@@ -63,11 +63,11 @@ async function refresh(showToast = false) {
   const icon = $("#refreshIcon");
   icon.classList.add("rotating");
   try {
-    const [health, providers, events, eventMatches, bookmakers, opportunities, candidates, markets, settings] = await Promise.all([
+    const [health, providers, events, eventMatches, bookmakers, opportunities, candidates, missingOutcomes, markets, settings] = await Promise.all([
       get("/health"), get("/health/providers"), get("/events"),
-      get("/event-matches"), get("/bookmakers"), get("/opportunities"), get("/market-candidates"), get("/markets"), get("/settings")
+      get("/event-matches"), get("/bookmakers"), get("/opportunities"), get("/market-candidates"), get("/missing-sportsbook-outcomes"), get("/markets"), get("/settings")
     ]);
-    Object.assign(state, { health, providers, events, eventMatches, bookmakers, opportunities, candidates, markets, settings });
+    Object.assign(state, { health, providers, events, eventMatches, bookmakers, opportunities, candidates, missingOutcomes, markets, settings });
     render();
     if (showToast) toast("Dashboard refreshed");
   } catch (error) {
@@ -108,6 +108,7 @@ function render() {
   populateFilters();
   renderOpportunityTable();
   renderCandidates();
+  renderMissingOutcomes();
   renderHealth();
   renderSettings();
 }
@@ -549,29 +550,88 @@ function renderCandidates() {
     c.prediction_quote.home_team, c.prediction_quote.away_team,
     c.prediction_quote.competition, c.prediction_quote.provider,
     c.prediction_quote.provider_event_id, c.prediction_quote.provider_market_id,
-    c.prediction_quote.market_type, c.rejection_reasons
-  ).includes(search))).slice(0, 120);
-  $("#candidateList").innerHTML = rows.map(c => {
-    const reasons = candidateRejectionReasons(c);
-    return `<article class="candidate-card" data-candidate-id="${esc(c.id)}">
-    <div><span class="cell-main">${esc(c.prediction_quote.home_team)} vs ${esc(c.prediction_quote.away_team)}</span><span class="cell-sub">${title(c.prediction_quote.sport)} · ${title(c.prediction_quote.provider)} · ${title(c.prediction_quote.market_type)}</span><span class="cell-sub">Prediction: ${esc(selectionLabel(c.prediction_quote))} → Sportsbook: ${esc(selectionLabel(c.sportsbook_quote))} · ${esc(c.sportsbook_quote.bookmaker_display_name)}</span></div>
-    <div><span class="cell-sub">Spread</span><span class="cell-main">${c.liquidity.spread_cents == null ? "—" : `${number(c.liquidity.spread_cents,1)}¢`}</span></div>
-    <div><span class="cell-sub">Depth</span><span class="cell-main">${money(c.liquidity.total_depth_within_window_usd)}</span></div>
-    <div class="reasons">${reasons.length ? reasons.map(r => `<span class="reason">${title(r)}</span>`).join("") : `<span class="cell-sub">All checks passed</span>`}</div>
-    <span class="decision ${c.accepted ? "accepted" : ""}">${c.accepted ? "Accepted" : "Rejected"}</span>
-    <div class="candidate-edge-inputs">
-      <div><small>Prediction ask</small><strong>${pct(c.prediction_quote.best_ask_probability, 2)}</strong></div>
-      <div><small>Sportsbook odds</small><strong>${number(c.sportsbook_quote.decimal_odds, 2)}</strong></div>
-      <div><small>Implied probability</small><strong>${pct(c.sportsbook_quote.implied_probability, 2)}</strong></div>
-      <div><small>Calculated edge</small><strong class="${Number(c.edge_percentage_points) >= 0 ? "positive" : ""}">${Number(c.edge_percentage_points) >= 0 ? "+" : ""}${number(c.edge_percentage_points, 2)} pp</strong></div>
-      <div><small>Configured threshold</small><strong>${number(c.configured_threshold, 2)} pp</strong></div>
-    </div>
-    <button class="text-button candidate-audit-button" type="button" data-candidate-audit="${esc(c.id)}">Inspect full audit →</button>
-  </article>`;
+    c.prediction_quote.market_type, c.sportsbook_quote.bookmaker_display_name,
+    c.sportsbook_quote.bookmaker_id, c.rejection_reasons
+  ).includes(search)));
+  const events = new Map();
+  rows.forEach(candidate => {
+    const quote = candidate.prediction_quote;
+    const eventKey = String(quote.canonical_event_id);
+    if (!events.has(eventKey)) events.set(eventKey, []);
+    events.get(eventKey).push(candidate);
+  });
+  state.visibleCandidateEventKeys = [...events.keys()];
+  $("#candidateList").innerHTML = [...events.entries()].map(([eventKey, eventCandidates]) => {
+    const first = eventCandidates[0].prediction_quote;
+    const accepted = eventCandidates.filter(candidate => candidate.accepted).length;
+    const expanded = state.expandedCandidateEvents.has(eventKey);
+    const providers = new Map();
+    eventCandidates.forEach(candidate => {
+      const provider = candidate.prediction_quote.provider;
+      if (!providers.has(provider)) providers.set(provider, []);
+      providers.get(provider).push(candidate);
+    });
+    const providerMarkup = [...providers.entries()].map(([provider, providerCandidates]) => {
+      const outcomes = new Map();
+      providerCandidates.forEach(candidate => {
+        const quote = candidate.prediction_quote;
+        const outcomeKey = JSON.stringify([quote.market_type, quote.selection, quote.line, quote.participant]);
+        if (!outcomes.has(outcomeKey)) outcomes.set(outcomeKey, []);
+        outcomes.get(outcomeKey).push(candidate);
+      });
+      const outcomeMarkup = [...outcomes.values()].map(outcomeCandidates => {
+        const prediction = outcomeCandidates[0].prediction_quote;
+        return `<section class="candidate-outcome-group">
+          <header><div><small>Outcome</small><strong>${title(prediction.market_type)} · ${esc(selectionLabel(prediction))}</strong></div><span>${outcomeCandidates.length} sportsbook${outcomeCandidates.length === 1 ? "" : "s"}</span></header>
+          <div class="candidate-comparisons">${outcomeCandidates.map(candidate => {
+            const reasons = candidateRejectionReasons(candidate);
+            return `<article class="candidate-comparison" data-candidate-id="${esc(candidate.id)}">
+              <div><span class="cell-main">${esc(candidate.sportsbook_quote.bookmaker_display_name)}</span><span class="cell-sub">${esc(selectionLabel(candidate.sportsbook_quote))}</span></div>
+              <div><span class="cell-sub">Prediction ask</span><span class="cell-main">${pct(candidate.prediction_quote.best_ask_probability, 2)}</span></div>
+              <div><span class="cell-sub">Sportsbook odds</span><span class="cell-main">${number(candidate.sportsbook_quote.decimal_odds, 2)} · ${pct(candidate.sportsbook_quote.implied_probability, 2)}</span></div>
+              <div><span class="cell-sub">Edge</span><span class="cell-main ${Number(candidate.edge_percentage_points) >= 0 ? "positive" : ""}">${Number(candidate.edge_percentage_points) >= 0 ? "+" : ""}${number(candidate.edge_percentage_points, 2)} pp</span></div>
+              <div class="reasons">${reasons.length ? reasons.map(item => `<span class="reason">${title(item)}</span>`).join("") : `<span class="cell-sub">All checks passed</span>`}</div>
+              <span class="decision ${candidate.accepted ? "accepted" : ""}">${candidate.accepted ? "Accepted" : "Rejected"}</span>
+              <button class="text-button candidate-audit-button" type="button" data-candidate-audit="${esc(candidate.id)}">Inspect audit →</button>
+            </article>`;
+          }).join("")}</div>
+        </section>`;
+      }).join("");
+      return `<section class="candidate-provider-group"><h4>${title(provider)} prediction market</h4>${outcomeMarkup}</section>`;
+    }).join("");
+    return `<article class="candidate-event-group ${expanded ? "expanded" : ""}">
+      <button class="candidate-event-toggle" type="button" data-candidate-event="${esc(eventKey)}" aria-expanded="${expanded}">
+        <div><span class="cell-main">${esc(first.home_team)} vs ${esc(first.away_team)}</span><span class="cell-sub">${esc(first.competition)} · ${dateTime(first.kickoff_time_utc)}</span></div>
+        <div class="candidate-event-summary"><span>${providers.size} provider${providers.size === 1 ? "" : "s"}</span><span>${eventCandidates.length} comparisons</span><span>${accepted} qualified</span><b>${expanded ? "−" : "+"}</b></div>
+      </button>
+      <div class="candidate-event-body ${expanded ? "" : "hidden"}">${providerMarkup}</div>
+    </article>`;
   }).join("") ||
     `<div class="empty-state"><span>◇</span><h3>No candidates match</h3><p>Adjust the decision filters.</p></div>`;
+  $$('[data-candidate-event]').forEach(button => button.addEventListener("click", () => {
+    const eventKey = button.dataset.candidateEvent;
+    if (state.expandedCandidateEvents.has(eventKey)) state.expandedCandidateEvents.delete(eventKey);
+    else state.expandedCandidateEvents.add(eventKey);
+    renderCandidates();
+  }));
   $$('[data-candidate-audit]').forEach(button => button.addEventListener("click", () => openCandidateModal(button.dataset.candidateAudit)));
   renderCandidateModal();
+}
+
+function renderMissingOutcomes() {
+  $("#missingOutcomeCount").textContent = state.missingOutcomes.length.toLocaleString();
+  $("#missingOutcomeList").classList.toggle("hidden", !state.missingOutcomesExpanded);
+  $("#toggleMissingOutcomes").textContent = state.missingOutcomesExpanded ? "Collapse" : "Expand";
+  $("#toggleMissingOutcomes").setAttribute("aria-expanded", String(state.missingOutcomesExpanded));
+  $("#missingOutcomeList").innerHTML = state.missingOutcomes.slice(0, 120).map(item => {
+    const quote = item.prediction_quote;
+    return `<article class="candidate-card missing-outcome-card">
+      <div><span class="cell-main">${esc(quote.home_team)} vs ${esc(quote.away_team)}</span><span class="cell-sub">${title(quote.provider)} · ${title(quote.market_type)} · ${esc(selectionLabel(quote))}</span></div>
+      <div><span class="cell-sub">Sportsbook</span><span class="cell-main">${esc(item.bookmaker_display_name)}</span></div>
+      <div><span class="cell-sub">Prediction market ID</span><span class="cell-main">${esc(quote.provider_market_id)}</span></div>
+      <span class="decision">${title(item.rejection_reason)}</span>
+    </article>`;
+  }).join("") || `<div class="empty-state compact"><span>✓</span><h3>No missing outcomes</h3><p>Every prediction outcome has an aligned sportsbook quote.</p></div>`;
 }
 
 function renderHealth() {
@@ -678,6 +738,18 @@ $("#unmatchedSearch").addEventListener("input", () => {
   renderUnmatchedEvents();
 });
 $("#candidateSearch").addEventListener("input", renderCandidates);
+$("#expandAllCandidates").addEventListener("click", () => {
+  state.visibleCandidateEventKeys.forEach(key => state.expandedCandidateEvents.add(key));
+  renderCandidates();
+});
+$("#collapseAllCandidates").addEventListener("click", () => {
+  state.expandedCandidateEvents.clear();
+  renderCandidates();
+});
+$("#toggleMissingOutcomes").addEventListener("click", () => {
+  state.missingOutcomesExpanded = !state.missingOutcomesExpanded;
+  renderMissingOutcomes();
+});
 $("#candidateAuditClose").addEventListener("click", closeCandidateModal);
 $("#candidateAuditBackdrop").addEventListener("click", closeCandidateModal);
 $("#mappingAuditClose").addEventListener("click", closeMappingModal);

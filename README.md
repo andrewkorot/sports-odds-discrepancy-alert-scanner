@@ -115,10 +115,16 @@ In live mode the control state is retained in Redis across application restarts.
 The System page also allows the operational thresholds, freshness/liquidity rules,
 matching tolerances, polling interval, provider concurrency, and automatic schedule
 to be edited without rebuilding or restarting the application. Updates use
-`PATCH /settings`, are validated before being applied, and are stored in Redis in
-live mode. Environment values provide the initial defaults. Credentials, provider
+`PATCH /settings`, are validated before being applied, and are stored in PostgreSQL
+in live mode. Environment values provide the initial defaults until a user saves a
+runtime value. Redis remains limited to short-lived alert deduplication and scanner
+run-control state. Credentials, provider
 URLs, Telegram destinations, and database/Redis connection details are never
 runtime-editable or returned by this endpoint.
+
+On the first deployment of this version, any existing legacy
+`scanner:runtime-settings` Redis value is migrated automatically into PostgreSQL and
+then removed from Redis.
 
 Sport is a first-class field on canonical events, prediction quotes,
 sportsbook quotes, opportunities, API filters, alerts, and the dashboard.

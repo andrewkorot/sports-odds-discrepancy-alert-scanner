@@ -30,7 +30,8 @@ from app.services.scanner import ScannerState
 
 logger = logging.getLogger("uvicorn.error")
 SCAN_CONTROL_REDIS_KEY = "scanner:run-control"
-RUNTIME_SETTINGS_REDIS_KEY = "scanner:runtime-settings"
+RUNTIME_SETTINGS_DATABASE_KEY = "runtime_settings"
+LEGACY_RUNTIME_SETTINGS_REDIS_KEY = "scanner:runtime-settings"
 
 
 class SportsConnector(Protocol):
@@ -215,9 +216,9 @@ class ScanOrchestrator:
         if unknown:
             raise ValueError(f"Settings are not runtime-editable: {', '.join(sorted(unknown))}")
         validated = Settings.model_validate({**self.settings.model_dump(), **updates})
+        await self._persist_runtime_settings(validated)
         for key in updates:
             setattr(self.settings, key, getattr(validated, key))
-        await self._persist_runtime_settings()
         schedule_keys = {
             "auto_start_stop_enabled",
             "scan_auto_start_time",
@@ -233,14 +234,22 @@ class ScanOrchestrator:
         return {key: getattr(self.settings, key) for key in sorted(RUNTIME_SETTING_KEYS)}
 
     async def _load_runtime_settings(self) -> None:
-        if self._redis is None:
+        if self.repository is None:
             return
         try:
-            raw = await self._redis.get(RUNTIME_SETTINGS_REDIS_KEY)
-            if not raw:
-                return
-            values = json.loads(raw)
-            if not isinstance(values, dict):
+            values = await self.repository.load_system_setting(RUNTIME_SETTINGS_DATABASE_KEY)
+            if not values and self._redis is not None:
+                legacy_raw = await self._redis.get(LEGACY_RUNTIME_SETTINGS_REDIS_KEY)
+                legacy_values = json.loads(legacy_raw) if legacy_raw else None
+                if isinstance(legacy_values, dict):
+                    legacy_validated = Settings.model_validate(
+                        {**self.settings.model_dump(), **legacy_values}
+                    )
+                    await self._persist_runtime_settings(legacy_validated)
+                    await self._redis.delete(LEGACY_RUNTIME_SETTINGS_REDIS_KEY)
+                    values = legacy_values
+                    logger.info("scanner.runtime_settings.migrated_redis_to_postgresql")
+            if not values:
                 return
             validated = Settings.model_validate({**self.settings.model_dump(), **values})
             for key in RUNTIME_SETTING_KEYS:
@@ -249,16 +258,15 @@ class ScanOrchestrator:
         except Exception:
             logger.warning("scanner.runtime_settings.load_failed")
 
-    async def _persist_runtime_settings(self) -> None:
-        if self._redis is None:
+    async def _persist_runtime_settings(self, validated: Settings) -> None:
+        if self.repository is None:
             return
-        try:
-            await self._redis.set(
-                RUNTIME_SETTINGS_REDIS_KEY,
-                json.dumps(self.runtime_settings(), default=str),
-            )
-        except Exception:
-            logger.warning("scanner.runtime_settings.persistence_failed")
+        values = validated.model_dump(mode="json", include=set(RUNTIME_SETTING_KEYS))
+        await self.repository.save_system_setting(
+            RUNTIME_SETTINGS_DATABASE_KEY,
+            values,
+            self.scanner.clock.now(),
+        )
 
     async def _load_run_control(self) -> tuple[bool, bool] | None:
         if self._redis is None:

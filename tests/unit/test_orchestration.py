@@ -10,6 +10,22 @@ from app.services.orchestration import ScanOrchestrator
 from app.services.scanner import ScannerState
 
 
+class RuntimeSettingsRepository:
+    def __init__(self) -> None:
+        self.value: dict[str, object] | None = None
+
+    async def load_system_setting(self, key: str) -> dict[str, object] | None:
+        assert key == "runtime_settings"
+        return self.value
+
+    async def save_system_setting(
+        self, key: str, value: dict[str, object], updated_at: datetime
+    ) -> None:
+        assert key == "runtime_settings"
+        assert updated_at.tzinfo is not None
+        self.value = value
+
+
 async def test_dry_run_never_delivers_telegram() -> None:
     settings = Settings(
         app_mode="mock",
@@ -145,3 +161,27 @@ async def test_runtime_settings_apply_to_shared_scanner_configuration() -> None:
     assert settings.price_poll_interval_seconds == 125
     assert scanner.settings.edge_threshold_pp == Decimal("4.25")
     assert updated["edge_threshold_pp"] == Decimal("4.25")
+
+
+async def test_runtime_settings_persist_in_postgresql_repository_and_reload() -> None:
+    now = datetime(2026, 8, 5, 12, tzinfo=UTC)
+    settings = Settings(app_mode="mock", mock_mode=True)
+    repository = RuntimeSettingsRepository()
+    orchestrator = ScanOrchestrator(settings, ScannerState(settings, FrozenClock(now)))
+    orchestrator.repository = repository  # type: ignore[assignment]
+
+    await orchestrator.update_runtime_settings(
+        {"price_poll_interval_seconds": 180, "edge_threshold_pp": Decimal("4.5")}
+    )
+
+    assert repository.value is not None
+    assert repository.value["price_poll_interval_seconds"] == 180
+    restored_settings = Settings(app_mode="mock", mock_mode=True)
+    restored = ScanOrchestrator(
+        restored_settings,
+        ScannerState(restored_settings, FrozenClock(now)),
+    )
+    restored.repository = repository  # type: ignore[assignment]
+    await restored._load_runtime_settings()
+    assert restored_settings.price_poll_interval_seconds == 180
+    assert restored_settings.edge_threshold_pp == Decimal("4.5")

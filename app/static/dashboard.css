@@ -275,6 +275,30 @@ tbody tr:hover { background: #fbfcfb; }
 
 .candidate-list { display: grid; gap: 8px; }
 .candidate-card { display: grid; grid-template-columns: 1.5fr .8fr .8fr 1.3fr auto; gap: 14px; align-items: center; padding: 15px 17px; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; }
+.candidate-event-group { overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; }
+.candidate-event-group + .candidate-event-group { margin-top: 9px; }
+.candidate-event-group.expanded { border-color: #b9d7c8; box-shadow: var(--shadow); }
+.candidate-event-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 17px; border: 0; color: var(--ink); background: var(--surface); cursor: pointer; text-align: left; }
+.candidate-event-toggle:hover { background: var(--surface-soft); }
+.candidate-event-summary { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.candidate-event-summary span { padding: 5px 8px; border-radius: 999px; color: var(--muted); background: var(--surface-soft); font-size: 8px; font-weight: 700; }
+.candidate-event-summary b { width: 24px; height: 24px; display: grid; place-items: center; color: var(--brand); background: var(--brand-soft); border-radius: 7px; }
+.candidate-event-body { padding: 0 16px 16px; border-top: 1px solid var(--line); }
+.candidate-provider-group { padding-top: 14px; }
+.candidate-provider-group > h4 { margin: 0 0 8px; color: var(--brand); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+.candidate-outcome-group { overflow: hidden; margin-top: 8px; border: 1px solid var(--line); border-radius: 9px; }
+.candidate-outcome-group > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--surface-soft); }
+.candidate-outcome-group > header small { display: block; color: var(--muted); font-size: 7px; text-transform: uppercase; }
+.candidate-outcome-group > header strong { display: block; margin-top: 2px; font-size: 10px; }
+.candidate-outcome-group > header > span { color: var(--muted); font-size: 8px; }
+.candidate-comparison { display: grid; grid-template-columns: 1fr .75fr 1fr .65fr 1.5fr auto auto; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
+.candidate-comparison .candidate-audit-button { white-space: nowrap; }
+.missing-outcomes-panel { margin: 14px 0 12px; }
+.candidate-expand-controls { display: flex; justify-content: flex-end; gap: 7px; margin: -2px 0 10px; }
+.candidate-expand-controls button, .missing-outcome-actions button { min-height: 31px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); cursor: pointer; font-size: 9px; font-weight: 700; }
+.candidate-expand-controls button:hover, .missing-outcome-actions button:hover { border-color: #8fb9a5; background: var(--brand-soft); }
+.missing-outcome-actions { display: flex; align-items: center; gap: 8px; }
+.missing-outcome-card { grid-template-columns: 1.5fr 1fr 1fr auto; }
 .candidate-audit-button { grid-column: 1 / -1; justify-self: start; border: 0; background: transparent; cursor: pointer; padding: 0; }
 .candidate-edge-inputs { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 10px; background: var(--surface-soft); border-radius: 8px; }
 .candidate-edge-inputs div { min-width: 0; }
@@ -362,6 +386,8 @@ tbody tr:hover { background: #fbfcfb; }
   .health-grid { grid-template-columns: 1fr; }
   .settings-grid { grid-template-columns: repeat(2, 1fr); }
   .candidate-card { grid-template-columns: 1.4fr 1fr 1fr; }
+  .candidate-comparison { grid-template-columns: 1fr 1fr 1fr; }
+  .candidate-comparison .reasons { grid-column: 1 / -1; }
   .candidate-card .reasons { grid-column: 1 / -1; }
   .unmatched-summary { grid-template-columns: auto 1fr auto; }
   .unmatched-summary .audit-reasons { grid-column: 2 / -1; }
@@ -404,6 +430,11 @@ tbody tr:hover { background: #fbfcfb; }
   td:first-child { grid-column: 1 / -1; }
   td:before { content: attr(data-label); display: block; color: var(--muted); font-size: 7px; text-transform: uppercase; letter-spacing: .7px; margin-bottom: 3px; }
   .candidate-card { grid-template-columns: 1fr 1fr; padding: 13px; }
+  .candidate-event-toggle { align-items: flex-start; flex-direction: column; }
+  .candidate-event-summary { justify-content: flex-start; }
+  .candidate-event-body { padding: 0 10px 10px; }
+  .candidate-comparison { grid-template-columns: 1fr 1fr; }
+  .candidate-comparison > div:first-child, .candidate-comparison .reasons { grid-column: 1 / -1; }
   .candidate-edge-inputs { grid-template-columns: 1fr 1fr; }
   .audit-modal { padding: 0; place-items: stretch; }
   .audit-modal-panel { width: 100%; max-height: 100vh; min-height: 100vh; border: 0; border-radius: 0; padding: 16px; }

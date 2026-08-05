@@ -7,6 +7,7 @@ from app.domain.models import (
     CanonicalEvent,
     EventMatchAudit,
     MarketCandidate,
+    MissingSportsbookOutcomeAudit,
     Opportunity,
     PredictionMarketQuote,
     SportsbookQuote,
@@ -14,7 +15,11 @@ from app.domain.models import (
 from app.providers.mock.data import mock_order_books, mock_snapshot
 from app.services.clock import Clock, SystemClock
 from app.services.live_pipeline import LiveScanSnapshot
-from app.services.opportunity_detector import evaluate_candidates, opportunities_from_candidates
+from app.services.opportunity_detector import (
+    evaluate_candidates,
+    missing_sportsbook_outcomes,
+    opportunities_from_candidates,
+)
 
 
 class ScannerState:
@@ -27,6 +32,7 @@ class ScannerState:
         self.bookmakers: list[Bookmaker] = []
         self.opportunities: list[Opportunity] = []
         self.candidates: list[MarketCandidate] = []
+        self.missing_outcomes: list[MissingSportsbookOutcomeAudit] = []
         self.event_matches: list[EventMatchAudit] = []
         self.last_updated: datetime | None = None
 
@@ -45,6 +51,9 @@ class ScannerState:
         order_books = mock_order_books(predictions)
         self.candidates = evaluate_candidates(
             predictions, sportsbooks, bookmakers, self.settings, current, order_books
+        )
+        self.missing_outcomes = missing_sportsbook_outcomes(
+            predictions, sportsbooks, bookmakers, current
         )
         prediction = predictions[0]
         sportsbook = next(
@@ -106,6 +115,7 @@ class ScannerState:
         self.sportsbooks = snapshot.sportsbooks
         self.bookmakers = snapshot.bookmakers
         self.candidates = snapshot.candidates
+        self.missing_outcomes = snapshot.missing_outcomes
         self.opportunities = snapshot.opportunities
         self.event_matches = snapshot.event_matches
         self.last_updated = updated_at

@@ -139,6 +139,11 @@ class PredictionMarketQuoteRow(Base):
     __tablename__ = "prediction_market_quotes"
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     provider_market_id: Mapped[UUID] = mapped_column(ForeignKey("provider_markets.id"))
+    provider_source_market_id: Mapped[str | None] = mapped_column(String(256))
+    provider_market_name: Mapped[str | None] = mapped_column(Text)
+    provider_market_type: Mapped[str | None] = mapped_column(String(128))
+    provider_outcome_id: Mapped[str | None] = mapped_column(String(256))
+    provider_outcome_name: Mapped[str | None] = mapped_column(Text)
     best_bid_probability: Mapped[Decimal] = mapped_column(Numeric(12, 8))
     best_ask_probability: Mapped[Decimal] = mapped_column(Numeric(12, 8))
     best_bid_size: Mapped[Decimal] = mapped_column(Numeric(20, 4))
@@ -153,6 +158,12 @@ class SportsbookQuoteRow(Base):
     provider_event_id: Mapped[UUID] = mapped_column(ForeignKey("provider_events.id"))
     market_id: Mapped[UUID] = mapped_column(ForeignKey("markets.id"))
     bookmaker_id: Mapped[str] = mapped_column(ForeignKey("bookmakers.canonical_id"), index=True)
+    provider_market_id: Mapped[str | None] = mapped_column(String(128))
+    provider_market_name: Mapped[str | None] = mapped_column(Text)
+    provider_market_type: Mapped[str | None] = mapped_column(String(128))
+    provider_outcome_id: Mapped[str | None] = mapped_column(String(256))
+    provider_outcome_name: Mapped[str | None] = mapped_column(Text)
+    bookmaker_outcome_id: Mapped[str | None] = mapped_column(String(256))
     decimal_odds: Mapped[Decimal] = mapped_column(Numeric(12, 6))
     implied_probability: Mapped[Decimal] = mapped_column(Numeric(12, 8))
     source_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
@@ -213,6 +224,15 @@ class MarketCandidateRow(Base):
     configured_threshold: Mapped[Decimal] = mapped_column(Numeric(12, 6))
     rejection_reasons: Mapped[list[str]] = mapped_column(JSON, default=list)
     liquidity_qualification: Mapped[dict[str, object]] = mapped_column(JSON)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class MissingSportsbookOutcomeRow(Base):
+    __tablename__ = "missing_sportsbook_outcomes"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    prediction_quote_id: Mapped[UUID] = mapped_column(ForeignKey("prediction_market_quotes.id"))
+    bookmaker_id: Mapped[str] = mapped_column(ForeignKey("bookmakers.canonical_id"))
+    rejection_reason: Mapped[str] = mapped_column(String(64), index=True)
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
