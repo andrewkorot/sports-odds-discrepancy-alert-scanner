@@ -130,8 +130,57 @@ def test_edge_below_threshold() -> None:
 
 
 def test_stale_prediction_and_sportsbook_rejected() -> None:
-    assert not detected(mutate_prediction={"source_timestamp": NOW - timedelta(seconds=21)})
-    assert not detected(mutate_sportsbook={"source_timestamp": NOW - timedelta(seconds=61)})
+    settings = Settings(
+        max_prediction_price_age_seconds=20,
+        max_sportsbook_price_age_seconds=60,
+    )
+    assert not detected(
+        settings=settings,
+        mutate_prediction={"received_timestamp": NOW - timedelta(seconds=21)},
+    )
+    assert not detected(
+        settings=settings,
+        mutate_sportsbook={"received_timestamp": NOW - timedelta(seconds=61)},
+    )
+
+
+def test_old_provider_timestamps_are_fresh_when_quotes_were_just_received() -> None:
+    old_source_timestamp = NOW - timedelta(hours=12)
+
+    assert detected(
+        mutate_prediction={
+            "source_timestamp": old_source_timestamp,
+            "received_timestamp": NOW,
+        }
+    )
+    assert detected(
+        mutate_sportsbook={
+            "source_timestamp": old_source_timestamp,
+            "received_timestamp": NOW,
+        }
+    )
+
+
+def test_opportunity_age_reports_time_since_quote_was_received() -> None:
+    results = detected(
+        settings=Settings(
+            max_prediction_price_age_seconds=120,
+            max_sportsbook_price_age_seconds=120,
+            price_poll_interval_seconds=60,
+        ),
+        mutate_prediction={
+            "source_timestamp": NOW - timedelta(hours=1),
+            "received_timestamp": NOW - timedelta(seconds=10),
+        },
+        mutate_sportsbook={
+            "source_timestamp": NOW - timedelta(hours=2),
+            "received_timestamp": NOW - timedelta(seconds=20),
+        },
+    )
+
+    assert results
+    assert results[0].prediction_quote_age_seconds == Decimal("10.0")
+    assert results[0].sportsbook_quote_age_seconds == Decimal("20.0")
 
 
 def test_liquidity_disabled_and_live_rejected() -> None:

@@ -137,8 +137,12 @@ def evaluate_candidates(
                 reasons.append(matched.reason or "mapping_rejected")
             if not settlement_compatible(prediction, sportsbook):
                 reasons.append("settlement_mismatch")
-            prediction_age = quote_age_seconds(prediction.source_timestamp, now)
-            sportsbook_age = quote_age_seconds(sportsbook.source_timestamp, now)
+            # Freshness is based on when this scanner last retrieved the quote.
+            # Provider source timestamps often mean "last price change", so an
+            # unchanged price can have an old source timestamp despite having
+            # been successfully verified during the current scan.
+            prediction_age = quote_age_seconds(prediction.received_timestamp, now)
+            sportsbook_age = quote_age_seconds(sportsbook.received_timestamp, now)
             if prediction_age > settings.max_prediction_price_age_seconds:
                 reasons.append("stale_prediction_quote")
             if sportsbook_age > settings.max_sportsbook_price_age_seconds:
@@ -278,10 +282,10 @@ def opportunities_from_candidates(
                 edge_percentage_points=candidate.edge_percentage_points,
                 configured_threshold=settings.edge_threshold_pp,
                 prediction_quote_age_seconds=quote_age_seconds(
-                    prediction.source_timestamp, candidate.evaluated_at
+                    prediction.received_timestamp, candidate.evaluated_at
                 ),
                 sportsbook_quote_age_seconds=quote_age_seconds(
-                    sportsbook.source_timestamp, candidate.evaluated_at
+                    sportsbook.received_timestamp, candidate.evaluated_at
                 ),
                 liquidity_passed=True,
                 freshness_passed=True,
