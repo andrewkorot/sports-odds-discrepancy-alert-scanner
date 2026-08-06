@@ -457,6 +457,85 @@ async def test_oddspapi_http_failure_raises_credential_safe_exception() -> None:
 
 
 @pytest.mark.asyncio
+async def test_oddspapi_retries_transient_502_then_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    async def no_wait(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("app.providers.oddspapi.connector.asyncio.sleep", no_wait)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            return httpx.Response(502, request=request, text="temporary bad gateway")
+        return httpx.Response(
+            200,
+            request=request,
+            json=[
+                {
+                    "fixtureId": "fixture-1",
+                    "participant1Name": "Inter Miami",
+                    "participant2Name": "Atlanta United",
+                    "tournamentName": "MLS",
+                    "tournamentId": 17,
+                    "startTime": "2026-08-05T20:00:00Z",
+                    "statusId": 0,
+                    "statusName": "Pre-Game",
+                    "sportName": "Soccer",
+                }
+            ],
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    connector = SportsOddsConnector("secret", "https://api.oddspapi.io/v4", ["pinnacle"], client)
+
+    events = await connector.discover_events(
+        datetime(2026, 8, 5, tzinfo=UTC), datetime(2026, 8, 6, tzinfo=UTC)
+    )
+
+    assert attempts == 3
+    assert len(delays) == 2
+    assert events[0].provider_event_id == "fixture-1"
+    health = await connector.health()
+    assert health.connected
+    assert health.consecutive_failures == 0
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_oddspapi_stops_after_bounded_transient_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    async def no_wait(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.providers.oddspapi.connector.asyncio.sleep", no_wait)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(502, request=request, text="temporary bad gateway")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    connector = SportsOddsConnector("secret", "https://api.oddspapi.io/v4", ["pinnacle"], client)
+
+    with pytest.raises(OddsPapiHTTPError, match="OddsPapi HTTP 502"):
+        await connector.discover_events(
+            datetime(2026, 8, 5, tzinfo=UTC), datetime(2026, 8, 6, tzinfo=UTC)
+        )
+
+    assert attempts == 3
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_oddspapi_v4_fixture_discovery_contract(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

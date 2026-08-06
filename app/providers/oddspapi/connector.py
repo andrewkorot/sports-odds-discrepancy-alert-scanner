@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -27,6 +28,9 @@ from app.providers.records import (
 SPORT_ID_SOCCER = 10
 MAX_BULK_TOURNAMENT_IDS = 5
 BULK_ENDPOINT_COOLDOWN_SECONDS = 1.05
+TRANSIENT_RETRY_ATTEMPTS = 3
+TRANSIENT_RETRY_BASE_SECONDS = 0.5
+TRANSIENT_HTTP_STATUSES = frozenset({502, 503, 504})
 logger = logging.getLogger("uvicorn.error")
 _MONEYLINE_OUTCOME_ALIASES = {
     "home": {"1", "home"},
@@ -69,8 +73,18 @@ class OddsPapiHTTPError(RuntimeError):
         super().__init__(message)
 
 
+class OddsPapiTransportError(RuntimeError):
+    """Credential-safe transient network failure."""
+
+    def __init__(self, error_type: str) -> None:
+        self.error_type = error_type
+        super().__init__(f"OddsPapi request failed: {error_type}")
+
+
 def sanitized_error(exc: Exception) -> str:
     if isinstance(exc, OddsPapiHTTPError):
+        return str(exc)
+    if isinstance(exc, OddsPapiTransportError):
         return str(exc)
     if isinstance(exc, httpx.HTTPStatusError):
         return f"OddsPapi HTTP {exc.response.status_code}"
@@ -201,7 +215,7 @@ class SportsOddsConnector:
                 type(exc).__name__,
             )
 
-    async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    async def _get_once(self, path: str, params: dict[str, Any] | None = None) -> Any:
         attempted = datetime.now(UTC)
         started = perf_counter()
         try:
@@ -240,6 +254,8 @@ class SportsOddsConnector:
                     provider_detail or None,
                     retry_after_seconds,
                 )
+            elif isinstance(exc, httpx.RequestError):
+                safe_exception = OddsPapiTransportError(type(exc).__name__)
             self._health = self._health.model_copy(
                 update={
                     "connected": False,
@@ -253,6 +269,48 @@ class SportsOddsConnector:
             if safe_exception is not exc:
                 raise safe_exception from None
             raise
+
+    @staticmethod
+    def _is_transient_error(exc: Exception) -> bool:
+        return (
+            isinstance(exc, OddsPapiHTTPError) and exc.status_code in TRANSIENT_HTTP_STATUSES
+        ) or isinstance(exc, OddsPapiTransportError)
+
+    @staticmethod
+    def _retry_after_seconds(exc: Exception) -> float | None:
+        if not isinstance(exc, OddsPapiHTTPError) or not exc.retry_after:
+            return None
+        try:
+            return max(0.0, float(exc.retry_after))
+        except ValueError:
+            return None
+
+    async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """Retry transient gateway and transport failures without retrying permanent 4xx."""
+        for attempt in range(TRANSIENT_RETRY_ATTEMPTS):
+            try:
+                return await self._get_once(path, params)
+            except Exception as exc:
+                if not self._is_transient_error(exc) or attempt == TRANSIENT_RETRY_ATTEMPTS - 1:
+                    raise
+                retry_after = self._retry_after_seconds(exc)
+                delay = (
+                    retry_after
+                    if retry_after is not None
+                    else TRANSIENT_RETRY_BASE_SECONDS * (2**attempt) + random.uniform(0, 0.25)
+                )
+                logger.warning(
+                    "oddspapi.request.transient_failure path=%s error_type=%s "
+                    "status_code=%s retry_in_seconds=%.3f attempt=%d/%d",
+                    path,
+                    type(exc).__name__,
+                    exc.status_code if isinstance(exc, OddsPapiHTTPError) else None,
+                    delay,
+                    attempt + 1,
+                    TRANSIENT_RETRY_ATTEMPTS,
+                )
+                await asyncio.sleep(delay)
+        raise RuntimeError("unreachable OddsPapi retry state")
 
     async def _get_bulk_odds(self, params: dict[str, Any]) -> Any:
         """Pace bulk calls from response completion and retry one 429 safely."""
