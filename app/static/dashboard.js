@@ -575,14 +575,20 @@ function renderCandidates() {
       const outcomes = new Map();
       providerCandidates.forEach(candidate => {
         const quote = candidate.prediction_quote;
-        const outcomeKey = JSON.stringify([quote.market_type, quote.selection, quote.line, quote.participant]);
+        // A provider can expose multiple executable contracts for the same
+        // normalized outcome. Keep distinct market IDs separate so sportsbook
+        // comparisons do not appear as unexplained duplicate rows.
+        const outcomeKey = JSON.stringify([
+          quote.provider_market_id, quote.market_type, quote.selection,
+          quote.line, quote.participant
+        ]);
         if (!outcomes.has(outcomeKey)) outcomes.set(outcomeKey, []);
         outcomes.get(outcomeKey).push(candidate);
       });
       const outcomeMarkup = [...outcomes.values()].map(outcomeCandidates => {
         const prediction = outcomeCandidates[0].prediction_quote;
         return `<section class="candidate-outcome-group">
-          <header><div><small>Outcome</small><strong>${title(prediction.market_type)} · ${esc(selectionLabel(prediction))}</strong></div><span>${outcomeCandidates.length} sportsbook${outcomeCandidates.length === 1 ? "" : "s"}</span></header>
+          <header><div><small>Prediction contract</small><strong>${title(prediction.market_type)} · ${esc(selectionLabel(prediction))}</strong><span class="cell-sub">${esc(prediction.provider_market_name || prediction.provider_market_id)} · ${esc(prediction.provider_market_id)}</span></div><span>${outcomeCandidates.length} sportsbook${outcomeCandidates.length === 1 ? "" : "s"}</span></header>
           <div class="candidate-comparisons">${outcomeCandidates.map(candidate => {
             const reasons = candidateRejectionReasons(candidate);
             return `<article class="candidate-comparison" data-candidate-id="${esc(candidate.id)}">

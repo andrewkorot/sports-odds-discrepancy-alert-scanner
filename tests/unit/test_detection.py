@@ -6,6 +6,7 @@ from app.domain.enums import AvailabilityStatus, MarketStatus
 from app.domain.models import Opportunity
 from app.providers.mock.data import mock_snapshot
 from app.services.opportunity_detector import (
+    deduplicate_prediction_quotes,
     deduplicate_sportsbook_quotes,
     detect_opportunities,
     evaluate_candidates,
@@ -266,6 +267,44 @@ def test_sportsbook_quotes_are_deduplicated_to_newest_open_record() -> None:
     assert deduplicated == [newest_open]
     assert len(candidates) == 1
     assert candidates[0].sportsbook_quote == newest_open
+
+
+def test_prediction_quotes_are_deduplicated_by_executable_market_identity() -> None:
+    _, predictions, sportsbooks, books = mock_snapshot(NOW)
+    original = predictions[0]
+    older = original.model_copy(
+        update={
+            "best_ask_probability": Decimal("0.51"),
+            "received_timestamp": NOW - timedelta(seconds=2),
+        }
+    )
+    newest = original.model_copy(
+        update={
+            "best_ask_probability": Decimal("0.52"),
+            "received_timestamp": NOW - timedelta(seconds=1),
+        }
+    )
+
+    deduplicated = deduplicate_prediction_quotes([older, newest])
+    candidates = evaluate_candidates([older, newest], sportsbooks, books, Settings(), NOW)
+
+    assert deduplicated == [newest]
+    assert all(candidate.prediction_quote == newest for candidate in candidates)
+    assert len(candidates) == 6
+
+
+def test_distinct_prediction_market_ids_remain_independent() -> None:
+    _, predictions, sportsbooks, books = mock_snapshot(NOW)
+    first = predictions[0]
+    second = first.model_copy(update={"provider_market_id": f"{first.provider_market_id}-OTHER"})
+
+    candidates = evaluate_candidates([first, second], sportsbooks, books, Settings(), NOW)
+
+    assert len(candidates) == 12
+    assert {candidate.prediction_quote.provider_market_id for candidate in candidates} == {
+        first.provider_market_id,
+        second.provider_market_id,
+    }
 
 
 def test_missing_aligned_outcome_is_audited_without_fabricated_odds() -> None:

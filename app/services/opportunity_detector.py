@@ -40,6 +40,16 @@ type SportsbookQuoteIdentity = tuple[
     str | None,
     str,
 ]
+type PredictionQuoteIdentity = tuple[
+    object,
+    str,
+    object,
+    str,
+    object,
+    object,
+    Decimal | None,
+    str | None,
+]
 
 
 def _alignment_key(quote: PredictionMarketQuote | SportsbookQuote) -> QuoteAlignmentKey:
@@ -55,6 +65,36 @@ def _alignment_key(quote: PredictionMarketQuote | SportsbookQuote) -> QuoteAlign
 
 def _sportsbook_identity(quote: SportsbookQuote) -> SportsbookQuoteIdentity:
     return (*_alignment_key(quote), quote.bookmaker_id)
+
+
+def _prediction_identity(quote: PredictionMarketQuote) -> PredictionQuoteIdentity:
+    return (
+        quote.provider,
+        quote.provider_market_id,
+        quote.canonical_event_id,
+        quote.sport,
+        quote.market_type,
+        quote.selection,
+        quote.line,
+        quote.participant,
+    )
+
+
+def deduplicate_prediction_quotes(
+    quotes: list[PredictionMarketQuote],
+) -> list[PredictionMarketQuote]:
+    """Keep one newest quote per executable prediction-market outcome."""
+    grouped: dict[PredictionQuoteIdentity, list[PredictionMarketQuote]] = {}
+    for quote in quotes:
+        grouped.setdefault(_prediction_identity(quote), []).append(quote)
+    result: list[PredictionMarketQuote] = []
+    for values in grouped.values():
+        open_values = [quote for quote in values if quote.market_status == MarketStatus.OPEN]
+        eligible = open_values or values
+        result.append(
+            max(eligible, key=lambda quote: (quote.received_timestamp, quote.source_timestamp))
+        )
+    return result
 
 
 def deduplicate_sportsbook_quotes(quotes: list[SportsbookQuote]) -> list[SportsbookQuote]:
@@ -109,7 +149,7 @@ def evaluate_candidates(
     for sportsbook in deduplicate_sportsbook_quotes(sportsbooks):
         sportsbook_index.setdefault(_alignment_key(sportsbook), []).append(sportsbook)
     candidates: list[MarketCandidate] = []
-    for prediction in predictions:
+    for prediction in deduplicate_prediction_quotes(predictions):
         if prediction.sport not in settings.enabled_sports:
             continue
         for sportsbook in sportsbook_index.get(_alignment_key(prediction), []):
@@ -204,7 +244,7 @@ def missing_sportsbook_outcomes(
     enabled_books = [book for book in bookmakers if book.enabled]
     audits: list[MissingSportsbookOutcomeAudit] = []
     seen: set[tuple[object, ...]] = set()
-    for prediction in predictions:
+    for prediction in deduplicate_prediction_quotes(predictions):
         for book in enabled_books:
             key = (
                 prediction.provider,
