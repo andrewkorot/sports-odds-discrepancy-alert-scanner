@@ -8,6 +8,41 @@ import httpx
 from app.domain.models import Opportunity, PredictionMarketQuote, SportsbookQuote
 
 
+def _newest_unique_predictions(
+    quotes: Sequence[PredictionMarketQuote],
+) -> list[PredictionMarketQuote]:
+    unique: dict[tuple[object, ...], PredictionMarketQuote] = {}
+    for quote in quotes:
+        key = (
+            quote.provider,
+            quote.provider_market_id,
+            quote.market_type,
+            quote.selection,
+            quote.line,
+            quote.participant,
+        )
+        current = unique.get(key)
+        if current is None or quote.received_timestamp > current.received_timestamp:
+            unique[key] = quote
+    return list(unique.values())
+
+
+def _newest_unique_sportsbooks(quotes: Sequence[SportsbookQuote]) -> list[SportsbookQuote]:
+    unique: dict[tuple[object, ...], SportsbookQuote] = {}
+    for quote in quotes:
+        key = (
+            quote.bookmaker_id,
+            quote.market_type,
+            quote.selection,
+            quote.line,
+            quote.participant,
+        )
+        current = unique.get(key)
+        if current is None or quote.received_timestamp > current.received_timestamp:
+            unique[key] = quote
+    return list(unique.values())
+
+
 def format_telegram_alert(
     best: Opportunity,
     predictions: Sequence[PredictionMarketQuote],
@@ -18,24 +53,28 @@ def format_telegram_alert(
     localized_kickoff = best.kickoff_time_utc.astimezone(ZoneInfo(client_timezone))
     depth_window_label = f"{depth_window_from_midpoint_cents:g}"
     depth_window_unit = "cent" if depth_window_from_midpoint_cents == Decimal("1") else "cents"
-    matching_predictions = [
-        quote
-        for quote in predictions
-        if quote.canonical_event_id == best.canonical_event_id
-        and quote.market_type == best.market_type
-        and quote.selection == best.selection
-        and quote.line == best.line
-        and quote.participant == best.participant
-    ]
-    matching_sportsbooks = [
-        quote
-        for quote in sportsbooks
-        if quote.canonical_event_id == best.canonical_event_id
-        and quote.market_type == best.market_type
-        and quote.selection == best.selection
-        and quote.line == best.line
-        and quote.participant == best.participant
-    ]
+    matching_predictions = _newest_unique_predictions(
+        [
+            quote
+            for quote in predictions
+            if quote.canonical_event_id == best.canonical_event_id
+            and quote.market_type == best.market_type
+            and quote.selection == best.selection
+            and quote.line == best.line
+            and quote.participant == best.participant
+        ]
+    )
+    matching_sportsbooks = _newest_unique_sportsbooks(
+        [
+            quote
+            for quote in sportsbooks
+            if quote.canonical_event_id == best.canonical_event_id
+            and quote.market_type == best.market_type
+            and quote.selection == best.selection
+            and quote.line == best.line
+            and quote.participant == best.participant
+        ]
+    )
     selection = best.selection.value.title()
     if best.participant:
         selection = best.participant
@@ -49,13 +88,54 @@ def format_telegram_alert(
         f"{q.provider.value.title()}\n"
         f"Bid: {q.best_bid_probability:.1%} × {q.best_bid_size:,.0f}\n"
         f"Ask: {q.best_ask_probability:.1%} × {q.best_ask_size:,.0f}"
-        + (" — used for edge" if q.provider == best.prediction_market_provider else "")
+        + (
+            " — used for edge"
+            if q.provider == best.prediction_market_provider
+            and q.provider_market_id == best.prediction_market_id
+            else ""
+        )
         for q in matching_predictions
+    )
+    largest_sportsbook = min(
+        matching_sportsbooks,
+        key=lambda quote: quote.implied_probability,
+        default=None,
     )
     sportsbook_lines = "\n".join(
         f"{q.bookmaker_display_name}: {q.decimal_odds:.2f} → {q.implied_probability:.2%}"
+        + (
+            " — "
+            + ", ".join(
+                label
+                for label, applies in (
+                    ("this alert pair", q.bookmaker_id == best.bookmaker_id),
+                    (
+                        "largest edge",
+                        largest_sportsbook is not None
+                        and q.bookmaker_id == largest_sportsbook.bookmaker_id,
+                    ),
+                )
+                if applies
+            )
+            if q.bookmaker_id == best.bookmaker_id
+            or (
+                largest_sportsbook is not None
+                and q.bookmaker_id == largest_sportsbook.bookmaker_id
+            )
+            else ""
+        )
         for q in matching_sportsbooks
     )
+    largest_edge_line = ""
+    if largest_sportsbook is not None:
+        largest_edge = (
+            best.prediction_market_best_ask - largest_sportsbook.implied_probability
+        ) * 100
+        largest_edge_line = (
+            "Largest sportsbook edge for this prediction ask: "
+            f"{largest_sportsbook.bookmaker_display_name} "
+            f"({largest_edge:+.2f} percentage points)\n"
+        )
     links = "\n".join(
         link for link in [best.prediction_market_direct_url, best.sportsbook_direct_url] if link
     )
@@ -69,7 +149,7 @@ def format_telegram_alert(
         f"{best.competition}\n{best.home_team} vs {best.away_team}\n"
         f"Kickoff: {localized_kickoff:%Y-%m-%d %I:%M %p %Z}\n\n"
         f"Market:\n{best.market_type.value.title()} — {selection} — {period_label}\n\n"
-        "BEST OPPORTUNITY\n\n"
+        "QUALIFYING PAIR\n\n"
         f"Value side: Sportsbook — {best.bookmaker_display_name}\n"
         "Reference probability: Prediction market — "
         f"{best.prediction_market_provider.value.title()} "
@@ -83,7 +163,8 @@ def format_telegram_alert(
         f"Odds: {best.sportsbook_decimal_odds:.2f}\n"
         f"Implied probability: {best.sportsbook_implied_probability:.2%}\n\n"
         f"Edge: +{best.edge_percentage_points:.2f} percentage points\n"
-        f"Threshold: {best.configured_threshold:.2f}% PASSED\n\n"
+        f"Threshold: {best.configured_threshold:.2f}% PASSED\n"
+        f"{largest_edge_line}\n"
         "MARKET QUALITY\n\n"
         f"Spread: {best.spread_cents:.1f} cents — PASSED\n"
         f"Depth within {depth_window_label} {depth_window_unit} of midpoint: "

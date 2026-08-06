@@ -62,6 +62,78 @@ def test_telegram_formatting() -> None:
         f"({item.prediction_market_best_ask:.1%})"
     ) in message
     assert "this is not a signal to buy the prediction-market YES contract" in message
+    assert "QUALIFYING PAIR" in message
+    assert "BEST OPPORTUNITY" not in message
+    assert "this alert pair" in message
+    assert "largest edge" in message
+
+
+def test_telegram_deduplicates_quotes_and_identifies_largest_sportsbook_edge() -> None:
+    item, predictions, sportsbooks = opportunity()
+    base_prediction = next(
+        quote
+        for quote in predictions
+        if quote.provider == item.prediction_market_provider
+        and quote.provider_market_id == item.prediction_market_id
+    )
+    prediction = base_prediction.model_copy(
+        update={
+            "best_bid_probability": Decimal("0.61"),
+            "best_ask_probability": Decimal("0.62"),
+        }
+    )
+    base_sportsbook = next(
+        quote
+        for quote in sportsbooks
+        if quote.canonical_event_id == item.canonical_event_id
+        and quote.market_type == item.market_type
+        and quote.selection == item.selection
+        and quote.line == item.line
+        and quote.participant == item.participant
+    )
+    alert_pair = base_sportsbook.model_copy(
+        update={
+            "bookmaker_id": "leovegas",
+            "bookmaker_display_name": "LeoVegas",
+            "decimal_odds": Decimal("1.64"),
+            "implied_probability": Decimal("1") / Decimal("1.64"),
+        }
+    )
+    better = base_sportsbook.model_copy(
+        update={
+            "bookmaker_id": "betus",
+            "bookmaker_display_name": "BetUS",
+            "decimal_odds": Decimal("1.77"),
+            "implied_probability": Decimal("1") / Decimal("1.77"),
+        }
+    )
+    item = item.model_copy(
+        update={
+            "prediction_market_best_bid": Decimal("0.61"),
+            "prediction_market_best_ask": Decimal("0.62"),
+            "bookmaker_id": "leovegas",
+            "bookmaker_display_name": "LeoVegas",
+            "sportsbook_decimal_odds": Decimal("1.64"),
+            "sportsbook_implied_probability": Decimal("1") / Decimal("1.64"),
+            "edge_percentage_points": (
+                Decimal("0.62") - Decimal("1") / Decimal("1.64")
+            )
+            * 100,
+        }
+    )
+    duplicate_prediction = prediction.model_copy()
+
+    message = format_telegram_alert(
+        item,
+        [prediction, duplicate_prediction],
+        [alert_pair, better],
+    )
+
+    assert message.count("Kalshi\nBid:") == 1
+    assert "BetUS: 1.77 → 56.50% — largest edge" in message
+    assert f"{alert_pair.bookmaker_display_name}:" in message
+    assert "— this alert pair" in message
+    assert "Largest sportsbook edge for this prediction ask: BetUS" in message
 
 
 @pytest.mark.asyncio
