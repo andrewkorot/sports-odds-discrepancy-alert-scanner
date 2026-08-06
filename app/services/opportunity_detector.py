@@ -17,7 +17,7 @@ from app.services.event_matching import match_event
 from app.services.event_time import event_time_rejections
 from app.services.liquidity import make_level, qualify_liquidity
 from app.services.market_validation import (
-    markets_open,
+    market_status_rejections,
     quote_age_seconds,
     selection_rejections,
     settlement_compatible,
@@ -117,8 +117,7 @@ def evaluate_candidates(
             reasons: list[str] = []
             if book is None or not book.enabled or book.availability_status != "available":
                 reasons.append("provider_inactive")
-            if not markets_open(prediction, sportsbook):
-                reasons.append("market_inactive")
+            reasons.extend(market_status_rejections(prediction, sportsbook))
             if prediction.market_type.value not in settings.enabled_market_types:
                 reasons.append("market_type_disabled")
             reasons.extend(

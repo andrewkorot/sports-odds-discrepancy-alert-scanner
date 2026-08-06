@@ -189,6 +189,32 @@ def test_liquidity_disabled_and_live_rejected() -> None:
     assert not detected(mutate_prediction={"market_status": MarketStatus.LIVE})
 
 
+def test_market_inactive_rejection_identifies_prediction_side() -> None:
+    _, predictions, sportsbooks, books = mock_snapshot(NOW)
+    prediction = predictions[0].model_copy(update={"market_status": MarketStatus.CLOSED})
+
+    candidate = evaluate_candidates(
+        [prediction], [sportsbooks[0]], [books[0]], Settings(), NOW
+    )[0]
+
+    assert "prediction_market_inactive" in candidate.rejection_reasons
+    assert "sportsbook_quote_inactive" not in candidate.rejection_reasons
+    assert "market_inactive" not in candidate.rejection_reasons
+
+
+def test_market_inactive_rejection_identifies_sportsbook_side() -> None:
+    _, predictions, sportsbooks, books = mock_snapshot(NOW)
+    sportsbook = sportsbooks[0].model_copy(update={"market_status": MarketStatus.CLOSED})
+
+    candidate = evaluate_candidates(
+        [predictions[0]], [sportsbook], [books[0]], Settings(), NOW
+    )[0]
+
+    assert "sportsbook_quote_inactive" in candidate.rejection_reasons
+    assert "prediction_market_inactive" not in candidate.rejection_reasons
+    assert "market_inactive" not in candidate.rejection_reasons
+
+
 def test_missing_bookmaker_has_no_fabricated_quote() -> None:
     _, predictions, sportsbooks, books = mock_snapshot(NOW)
     sportsbooks = [q for q in sportsbooks if q.bookmaker_id != "coolbet"]

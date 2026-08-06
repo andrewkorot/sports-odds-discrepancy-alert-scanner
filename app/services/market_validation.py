@@ -42,8 +42,13 @@ def selection_rejections(
     return list(dict.fromkeys(reasons))
 
 
-def markets_open(prediction: PredictionMarketQuote, sportsbook: SportsbookQuote) -> bool:
-    return (
-        prediction.market_status == MarketStatus.OPEN
-        and sportsbook.market_status == MarketStatus.OPEN
-    )
+def market_status_rejections(
+    prediction: PredictionMarketQuote, sportsbook: SportsbookQuote
+) -> list[str]:
+    """Identify the inactive side instead of returning an ambiguous pair-level reason."""
+    reasons: list[str] = []
+    if prediction.market_status != MarketStatus.OPEN:
+        reasons.append("prediction_market_inactive")
+    if sportsbook.market_status != MarketStatus.OPEN:
+        reasons.append("sportsbook_quote_inactive")
+    return reasons
